@@ -5,9 +5,8 @@ import time
 
 def get_process_info():
     processes = []
-    
     current_user = os.getlogin()
-    
+
     for proc in psutil.process_iter(['name', 'status', 'username', 'pid']):
         try:
             proc_info = proc.as_dict(attrs=['name', 'status', 'username', 'pid'])
@@ -37,19 +36,52 @@ def get_process_info():
             continue
     return processes
 
+def is_room_valid_and_both_online(room_id):
+    try:
+        response = requests.get(f"http://localhost:5001/room-status/{room_id}")
+        if response.status_code == 404:
+            print("❌ Room not found. Please check the Room ID.")
+            exit()
+
+        elif response.status_code != 200:
+            print(f"⚠️ Server error while checking room. Status: {response.status_code}")
+            return False, False
+        
+        status = response.json()
+        return True, status.get('interviewerConnected', False)
+    
+    except requests.exceptions.RequestException as e:
+        print(f"Error checking room status: {e}")
+        return False, False
+
 if __name__ == "__main__":
-    student_id = "ADJC7F"
+    student_id = input("Enter Room ID: ")
     url = f"http://localhost:5001/send_processes/{student_id}"
 
-    for i in range(10):  # Run 10 iterations
-        print(f"\nIteration {i + 1}")
-        data = get_process_info()
-        print(f"Found {len(data)} user processes")
+    # Validate Room
+    room_exists, interviewer_online = is_room_valid_and_both_online(student_id)
+    if not room_exists:
+        exit(1)
 
-        try:
-            response = requests.post(url, json=data)
-            print(f"Sent data at {time.strftime('%H:%M:%S')} | Status: {response.status_code}")
-        except requests.exceptions.RequestException as e:
-            print(f"Error occurred: {e}")
+    print("✅ Room found.")
+    i = 0
+    while(True):  
+        print(f"\n🔁 Iteration {i + 1}")
+        i += 1
+
+        _, interviewer_online = is_room_valid_and_both_online(student_id)
+
+        if not interviewer_online:
+            print("🕒 Interviewer is not online. Skipping this round.")
+        else:
+            print("📡 Interviewer is online. Sending metrics...")
+            data = get_process_info()
+            data.sort(key=lambda x: x['memoryMB'], reverse=True)
+
+            try:
+                response = requests.post(url, json=data)
+                print(f"✅ Data sent at {time.strftime('%H:%M:%S')} | Status: {response.status_code}")
+            except requests.exceptions.RequestException as e:
+                print(f"❌ Error occurred while sending data: {e}")
 
         time.sleep(5)

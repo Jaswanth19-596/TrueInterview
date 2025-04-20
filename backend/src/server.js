@@ -303,7 +303,10 @@ io.on('connection', (socket) => {
 
           // Notify the interviewer if present
           if (room.interviewer) {
-            io.to(room.interviewer).emit('interviewee-joined', { roomId });
+            io.to(room.interviewer).emit('interviewee-joined', {
+              roomId,
+              intervieweeConnected: true,
+            });
           }
         }
       }
@@ -340,11 +343,21 @@ io.on('connection', (socket) => {
         });
       }
 
+      // If this is the interviewer joining, notify the interviewee
+      if (role === 'interviewer' && room.interviewee) {
+        io.to(room.interviewee).emit('interviewer-joined', {
+          roomId,
+          interviewerConnected: true,
+        });
+      }
+
       socket.emit('session-joined', {
         roomId,
         code: room.code,
         status: room.status,
         hasInterviewee: !!room.interviewee,
+        interviewerConnected: room.interviewerConnected,
+        intervieweeConnected: room.intervieweeConnected,
       });
     } catch (error) {
       console.error(`[ERROR] Failed to join session:`, error);
@@ -418,7 +431,10 @@ io.on('connection', (socket) => {
           room.interviewerConnected = false;
 
           // Only notify others in the room
-          socket.to(roomId).emit('interviewer-disconnected');
+          socket.to(roomId).emit('interviewer-disconnected', {
+            roomId,
+            interviewerConnected: false,
+          });
         }
 
         // Check if this was the interviewee
@@ -431,7 +447,10 @@ io.on('connection', (socket) => {
           room.intervieweeConnected = false;
 
           // Notify others in the room
-          socket.to(roomId).emit('interviewee-left');
+          socket.to(roomId).emit('interviewee-left', {
+            roomId,
+            intervieweeConnected: false,
+          });
         }
 
         // Update the room state
@@ -741,6 +760,73 @@ app.get('/', (req, res) => {
   res.json({ message: 'Interview Room Server' });
 });
 
+// Room status API endpoint
+app.get('/room-status/:roomId', (req, res) => {
+  const roomId = req.params.roomId;
+
+  // Check if room exists
+  if (!activeRooms.has(roomId)) {
+    return res.status(404).json({
+      status: 'error',
+      message: 'Room not found',
+    });
+  }
+
+  const room = activeRooms.get(roomId);
+
+  // Check if anyone is connected
+  if (room.interviewerConnected && room.intervieweeConnected) {
+    return res.status(200).json({
+      status: 'success',
+      message: 'Room is active',
+      roomId: roomId,
+      interviewerConnected: room.interviewerConnected || false,
+      intervieweeConnected: room.intervieweeConnected || false,
+      lastActive: room.lastActive,
+    });
+  } else {
+    return res.status(400).json({
+      status: 'error',
+      message: 'No participants connected to this room',
+      roomId: roomId,
+      lastActive: room.lastActive,
+    });
+  }
+});
+
+// Get all rooms status API endpoint (admin route)
+app.get('/api/rooms/status', (req, res) => {
+  // Simple API key check for admin access
+  const apiKey = req.headers['x-api-key'];
+
+  if (!apiKey || apiKey !== process.env.ADMIN_API_KEY) {
+    return res.status(401).json({
+      status: 'error',
+      message: 'Unauthorized access',
+    });
+  }
+
+  const roomsStatus = [];
+
+  for (const [roomId, room] of activeRooms.entries()) {
+    roomsStatus.push({
+      roomId,
+      interviewerConnected: room.interviewerConnected || false,
+      intervieweeConnected: room.intervieweeConnected || false,
+      status: room.status,
+      createdAt: room.createdAt,
+      lastActive: room.lastActive,
+      isActive: room.interviewerConnected || room.intervieweeConnected,
+    });
+  }
+
+  return res.status(200).json({
+    status: 'success',
+    count: roomsStatus.length,
+    rooms: roomsStatus,
+  });
+});
+
 app.post('/send_processes/:roomId', (req, res) => {
   const roomId = req.params.roomId;
   const data = req.body;
@@ -788,16 +874,21 @@ app.post('/send_processes/:roomId', (req, res) => {
   }
 
   // Auto-create room if it doesn't exist (using null as socket since this is from API)
+  // if (!activeRooms.has(roomId)) {
+  //   console.log(`[AUTO-CREATE] Creating room ${roomId} from API request`);
+  //   activeRooms.set(roomId, {
+  //     id: roomId,
+  //     interviewer: null,
+  //     interviewee: null,
+  //     code: '',
+  //     status: 'waiting',
+  //     createdAt: new Date(),
+  //   });
+  // }
+  // Check if there is a room or not, if there is no room, return Error.
   if (!activeRooms.has(roomId)) {
-    console.log(`[AUTO-CREATE] Creating room ${roomId} from API request`);
-    activeRooms.set(roomId, {
-      id: roomId,
-      interviewer: null,
-      interviewee: null,
-      code: '',
-      status: 'waiting',
-      createdAt: new Date(),
-    });
+    console.log(`[ERROR] Invalid room ID: ${roomId}`);
+    return res.status(404).json({ message: 'Room not found' });
   }
 
   // Store the latest metrics in the room

@@ -51,7 +51,10 @@ const InterviewSession = () => {
   const [showInstructionsDialog, setShowInstructionsDialog] = useState(false);
   const [systemMetrics, setSystemMetrics] = useState(null);
   const [foundInterviewCoder, setFoundInterviewCoder] = useState(false);
+  const [foundCluely, setFoundCluely] = useState(false);
   const [activeEditor, setActiveEditor] = useState(null);
+  const [interviewerConnected, setInterviewerConnected] = useState(false);
+  const [intervieweeConnected, setIntervieweeConnected] = useState(false);
 
   useEffect(() => {
     // Get room ID and role from URL params
@@ -165,10 +168,45 @@ const InterviewSession = () => {
       newSocket.emit('join-session', { roomId: roomIdParam, role: roleParam });
     });
 
+    newSocket.on('session-joined', (data) => {
+      console.log('Session joined:', data);
+      // Hide loading state since we're now in a session
+      setIsLoading(false);
+
+      // Update connection status based on data
+      if (data.interviewerConnected !== undefined) {
+        setInterviewerConnected(data.interviewerConnected);
+      }
+      if (data.intervieweeConnected !== undefined) {
+        setIntervieweeConnected(data.intervieweeConnected);
+      }
+
+      if (data.code) {
+        setCode(data.code);
+        // Save to localStorage
+        localStorage.setItem(`code-${roomIdParam}`, data.code);
+      }
+    });
+
+    newSocket.on('interviewer-joined', () => {
+      console.log('Interviewer joined the session');
+      setInterviewerConnected(true);
+    });
+
+    newSocket.on('interviewer-disconnected', () => {
+      console.log('Interviewer disconnected from the session');
+      setInterviewerConnected(false);
+    });
+
     newSocket.on('interviewee-joined', (data) => {
       console.log('Interviewee joined:', data);
       setError('');
-      // We removed sessionStatus state, so update UI a different way
+      setIntervieweeConnected(true);
+    });
+
+    newSocket.on('interviewee-left', () => {
+      console.log('Interviewee left the session');
+      setIntervieweeConnected(false);
     });
 
     newSocket.on('code-update', (data) => {
@@ -183,18 +221,6 @@ const InterviewSession = () => {
       // If data contains activeEditor, update it
       if (data && data.activeEditor) {
         setActiveEditor(data.activeEditor);
-      }
-    });
-
-    newSocket.on('session-joined', (data) => {
-      console.log('Session joined:', data);
-      // Hide loading state since we're now in a session
-      setIsLoading(false);
-
-      if (data.code) {
-        setCode(data.code);
-        // Save to localStorage
-        localStorage.setItem(`code-${roomIdParam}`, data.code);
       }
     });
 
@@ -272,9 +298,20 @@ const InterviewSession = () => {
               );
             setFoundInterviewCoder(found);
 
+            // Check if Cluely is detected in the processes
+            const foundCluelyApp =
+              Array.isArray(data.data) &&
+              data.data.some(
+                (process) =>
+                  process.processName && process.processName.includes('Cluely')
+              );
+            setFoundCluely(foundCluelyApp);
+
             console.log(
               'Updated systemMetrics state, Interview Coder found:',
-              found
+              found,
+              'Cluely found:',
+              foundCluelyApp
             );
           }
         } else {
@@ -308,9 +345,21 @@ const InterviewSession = () => {
               process.processName.includes('Interview Coder')
           );
         setFoundInterviewCoder(found);
+
+        // Check if Cluely is detected in the processes
+        const foundCluelyApp =
+          Array.isArray(data.data) &&
+          data.data.some(
+            (process) =>
+              process.processName && process.processName.includes('Cluely')
+          );
+        setFoundCluely(foundCluelyApp);
+
         console.log(
           'Updated systemMetrics from broadcast, Interview Coder found:',
-          found
+          found,
+          'Cluely found:',
+          foundCluelyApp
         );
       } else {
         console.log(
@@ -1115,6 +1164,7 @@ const InterviewSession = () => {
                     <Box sx={{ mb: 2 }}>
                       <Typography
                         variant="body2"
+                        component="div"
                         color="text.secondary"
                         sx={{
                           display: 'flex',
@@ -1136,6 +1186,7 @@ const InterviewSession = () => {
                     <Box sx={{ mb: 2 }}>
                       <Typography
                         variant="body2"
+                        component="div"
                         color="text.secondary"
                         sx={{
                           display: 'flex',
@@ -1160,9 +1211,10 @@ const InterviewSession = () => {
                       </Typography>
                     </Box>
 
-                    <Box>
+                    <Box sx={{ mb: 2 }}>
                       <Typography
                         variant="body2"
+                        component="div"
                         color="text.secondary"
                         sx={{
                           display: 'flex',
@@ -1182,6 +1234,113 @@ const InterviewSession = () => {
                           }}
                         />
                       </Typography>
+                    </Box>
+
+                    <Box sx={{ mb: 2 }}>
+                      <Typography
+                        variant="subtitle2"
+                        component="div"
+                        sx={{
+                          mb: 1,
+                          color: 'text.primary',
+                          fontWeight: 600,
+                        }}
+                      >
+                        Participants Status:
+                      </Typography>
+
+                      <Box
+                        sx={{
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: 1,
+                          border: '1px solid',
+                          borderColor: 'rgba(0, 0, 0, 0.08)',
+                          borderRadius: 1,
+                          p: 1,
+                          backgroundColor: 'rgba(0, 0, 0, 0.02)',
+                        }}
+                      >
+                        <Box
+                          sx={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                          }}
+                        >
+                          <Typography
+                            variant="body2"
+                            component="div"
+                            sx={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 0.5,
+                            }}
+                          >
+                            <Box
+                              sx={{
+                                width: 8,
+                                height: 8,
+                                borderRadius: '50%',
+                                bgcolor: interviewerConnected
+                                  ? '#4caf50'
+                                  : '#f44336',
+                              }}
+                            />
+                            Interviewer
+                          </Typography>
+                          <Chip
+                            size="small"
+                            label={interviewerConnected ? 'Online' : 'Offline'}
+                            color={interviewerConnected ? 'success' : 'default'}
+                            sx={{
+                              height: 22,
+                              fontSize: '0.7rem',
+                              borderRadius: 4,
+                            }}
+                          />
+                        </Box>
+
+                        <Box
+                          sx={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                          }}
+                        >
+                          <Typography
+                            variant="body2"
+                            component="div"
+                            sx={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 0.5,
+                            }}
+                          >
+                            <Box
+                              sx={{
+                                width: 8,
+                                height: 8,
+                                borderRadius: '50%',
+                                bgcolor: intervieweeConnected
+                                  ? '#4caf50'
+                                  : '#f44336',
+                              }}
+                            />
+                            Interviewee
+                          </Typography>
+                          <Chip
+                            size="small"
+                            label={intervieweeConnected ? 'Online' : 'Offline'}
+                            color={intervieweeConnected ? 'success' : 'default'}
+                            sx={{
+                              height: 22,
+                              fontSize: '0.7rem',
+                              borderRadius: 4,
+                            }}
+                          />
+                        </Box>
+                      </Box>
                     </Box>
                   </CardContent>
                 </Card>
@@ -1349,8 +1508,10 @@ const InterviewSession = () => {
                     sx={{
                       mt: 2,
                       display: 'flex',
+                      flexDirection: 'column',
                       justifyContent: 'center',
                       px: { xs: 1, sm: 2 },
+                      gap: 1,
                     }}
                   >
                     <Chip
@@ -1362,6 +1523,26 @@ const InterviewSession = () => {
                       }
                       color={foundInterviewCoder ? 'error' : 'success'}
                       variant={foundInterviewCoder ? 'filled' : 'outlined'}
+                      sx={{
+                        fontWeight: 500,
+                        py: 0.5,
+                        height: 36,
+                        fontSize: '0.85rem',
+                        width: '100%',
+                        '& .MuiChip-icon': {
+                          color: 'inherit',
+                        },
+                      }}
+                    />
+
+                    {/* Cluely Detection Status */}
+                    <Chip
+                      icon={<CheckCircleIcon />}
+                      label={
+                        foundCluely ? 'Cluely Detected' : 'Cluely Not Detected'
+                      }
+                      color={foundCluely ? 'error' : 'success'}
+                      variant={foundCluely ? 'filled' : 'outlined'}
                       sx={{
                         fontWeight: 500,
                         py: 0.5,
