@@ -23,7 +23,7 @@ body,
   width: 100%;
   margin: 0;
   padding: 0;
-  overflow: hidden;
+  overflow: auto;
 }
 
 a {
@@ -41,6 +41,7 @@ body {
   min-width: 320px;
   min-height: 100vh;
   overflow-x: hidden;
+  overflow-y: auto;
 }
 
 h1 {
@@ -140,4 +141,30 @@ textarea::-webkit-scrollbar-thumb {
     color: rgba(255, 255, 255, 0.87);
     background-color: #1a1a1a;
   }
+}
+
+/* Add custom scrollbar styling for the whole page */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.05);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(0, 0, 0, 0.3);
+}
+
+/* For Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 0, 0, 0.2) rgba(0, 0, 0, 0.05);
 }

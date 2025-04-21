@@ -10,7 +10,7 @@ const Home = () => {
         <Grid container spacing={4} alignItems="center">
           <Grid item xs={12} md={6}>
             <Typography variant="h2" component="h1" gutterBottom>
-              Interview Monitoring System
+              True Interview
             </Typography>
             <Typography variant="h5" color="text.secondary" paragraph>
               A comprehensive solution for conducting and monitoring interviews
@@ -44,7 +44,7 @@ const Home = () => {
                 boxShadow: 3,
               }}
               src="/interview-monitoring.jpg"
-              alt="Interview Monitoring"
+              alt="True Interview"
             />
           </Grid>
         </Grid>

@@ -1,4 +1,4 @@
-# OneDay Interview Platform
+# True Interview
 
 A real-time coding interview platform with system metrics monitoring.
 

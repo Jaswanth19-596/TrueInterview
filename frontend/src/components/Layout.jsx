@@ -15,17 +15,22 @@ import {
   Avatar,
   Menu,
   MenuItem,
+  Tooltip,
 } from '@mui/material';
 import MenuIcon from '@mui/icons-material/Menu';
 import HomeIcon from '@mui/icons-material/Home';
 import DashboardIcon from '@mui/icons-material/Dashboard';
 import LoginIcon from '@mui/icons-material/Login';
 import PersonAddIcon from '@mui/icons-material/PersonAdd';
+import Brightness4Icon from '@mui/icons-material/Brightness4';
+import Brightness7Icon from '@mui/icons-material/Brightness7';
 import { useAuth } from '../context/AuthContext';
+import { useTheme } from '../context/ThemeContext';
 
 const Layout = ({ children }) => {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
+  const { mode, toggleTheme } = useTheme();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [anchorEl, setAnchorEl] = useState(null);
 
@@ -77,8 +82,16 @@ const Layout = ({ children }) => {
             <MenuIcon />
           </IconButton>
           <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
-            Interview Monitoring System
+            True Interview
           </Typography>
+
+          {/* Theme toggle button */}
+          <Tooltip title={`Toggle ${mode === 'light' ? 'dark' : 'light'} mode`}>
+            <IconButton color="inherit" onClick={toggleTheme} sx={{ mr: 1 }}>
+              {mode === 'light' ? <Brightness4Icon /> : <Brightness7Icon />}
+            </IconButton>
+          </Tooltip>
+
           {user ? (
             <>
               <IconButton
@@ -156,6 +169,16 @@ const Layout = ({ children }) => {
                   <ListItemText primary={item.text} />
                 </ListItem>
               ))}
+
+            {/* Theme toggle in drawer */}
+            <ListItem button onClick={toggleTheme}>
+              <ListItemIcon>
+                {mode === 'light' ? <Brightness4Icon /> : <Brightness7Icon />}
+              </ListItemIcon>
+              <ListItemText
+                primary={`${mode === 'light' ? 'Dark' : 'Light'} Mode`}
+              />
+            </ListItem>
           </List>
         </Box>
       </Drawer>

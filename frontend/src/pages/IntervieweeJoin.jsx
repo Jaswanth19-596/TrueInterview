@@ -8,6 +8,7 @@ import {
   TextField,
   Button,
   Alert,
+  Divider,
 } from '@mui/material';
 import { io } from 'socket.io-client';
 
@@ -17,7 +18,6 @@ const IntervieweeJoin = () => {
   const navigate = useNavigate();
   const [roomId, setRoomId] = useState('');
   const [error, setError] = useState('');
-  const [isConnected, setIsConnected] = useState(false);
   const [isJoining, setIsJoining] = useState(false);
 
   const handleJoinRoom = () => {
@@ -32,7 +32,6 @@ const IntervieweeJoin = () => {
     const socket = io(SOCKET_URL);
 
     socket.on('connect', () => {
-      setIsConnected(true);
       socket.emit('join-room', roomId.trim());
     });
 
@@ -43,7 +42,9 @@ const IntervieweeJoin = () => {
     });
 
     socket.on('room-not-found', () => {
-      setError('Room not found. Please check the room ID.');
+      setError(
+        'Room not found. Please check the room ID provided by your interviewer.'
+      );
       setIsJoining(false);
       socket.disconnect();
     });
@@ -72,6 +73,15 @@ const IntervieweeJoin = () => {
           <Box sx={{ mt: 3 }}>
             <Typography variant="body1" gutterBottom>
               Enter the room ID provided by your interviewer
+            </Typography>
+
+            <Typography
+              variant="body2"
+              color="text.secondary"
+              sx={{ mt: 1, mb: 2 }}
+            >
+              Note: You can only join an existing room. Ask your interviewer to
+              create a room first and share the room ID with you.
             </Typography>
 
             {error && (

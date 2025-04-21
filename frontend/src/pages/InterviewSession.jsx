@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Container,
@@ -25,6 +25,9 @@ import {
   CardContent,
   LinearProgress,
   Badge,
+  Avatar,
+  Backdrop,
+  Snackbar,
 } from '@mui/material';
 import { io } from 'socket.io-client';
 import LogoutIcon from '@mui/icons-material/Logout';
@@ -33,14 +36,191 @@ import RefreshIcon from '@mui/icons-material/Refresh';
 import MemoryIcon from '@mui/icons-material/Memory';
 import CodeIcon from '@mui/icons-material/Code';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import Brightness4Icon from '@mui/icons-material/Brightness4';
+import Brightness7Icon from '@mui/icons-material/Brightness7';
+import SendIcon from '@mui/icons-material/Send';
+import ChatIcon from '@mui/icons-material/Chat';
 import { downloadFile } from '../utils/fileUtils';
+import { useTheme } from '../context/ThemeContext';
+import { format } from 'date-fns';
+import RadioIcon from '@mui/icons-material/Radio';
+import SignalWifiOffIcon from '@mui/icons-material/SignalWifiOff';
+import Editor from '@monaco-editor/react';
 
 const SOCKET_URL = 'http://localhost:5001';
 const INSTRUCTIONS_PATH = '/assets/main.py';
 
+// Custom code editor component with line numbers
+const CodeEditorWithLineNumbers = ({ value, onChange, isDarkMode }) => {
+  const textAreaRef = useRef(null);
+  const lineNumbersRef = useRef(null);
+  const [lineCount, setLineCount] = useState(1);
+
+  // Update line count when value changes
+  useEffect(() => {
+    if (!value) {
+      setLineCount(1);
+      return;
+    }
+    const lines = value.split('\n').length;
+    setLineCount(Math.max(lines, 1));
+  }, [value]);
+
+  // Create an array of line numbers
+  const lineNumbers = Array.from(
+    { length: lineCount + 3 },
+    (_, i) => i + 1
+  ).slice(0, lineCount);
+
+  // Handle keydown events - specifically for tab key
+  const handleKeyDown = (e) => {
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      const start = e.target.selectionStart;
+      const end = e.target.selectionEnd;
+
+      // Insert 2 spaces for tab
+      const newValue = value.substring(0, start) + '  ' + value.substring(end);
+      onChange({ target: { value: newValue } });
+
+      // Set cursor position after the inserted tab
+      setTimeout(() => {
+        if (textAreaRef.current) {
+          textAreaRef.current.selectionStart = start + 2;
+          textAreaRef.current.selectionEnd = start + 2;
+        }
+      }, 0);
+    }
+  };
+
+  // Sync scrolling between textarea and line numbers
+  const handleScroll = (e) => {
+    if (lineNumbersRef.current) {
+      lineNumbersRef.current.scrollTop = e.target.scrollTop;
+    }
+  };
+
+  return (
+    <Box
+      sx={{
+        display: 'flex',
+        height: '100%',
+        width: '100%',
+        border: '1px solid',
+        borderColor: isDarkMode
+          ? 'rgba(255, 255, 255, 0.1)'
+          : 'rgba(0, 0, 0, 0.1)',
+        borderRadius: 2,
+        overflow: 'hidden',
+        position: 'relative',
+      }}
+    >
+      {/* Line numbers */}
+      <Box
+        ref={lineNumbersRef}
+        sx={{
+          backgroundColor: isDarkMode ? '#1E293B' : '#f1f5f9',
+          color: isDarkMode ? '#64748B' : '#94a3b8',
+          fontFamily: '"Fira Code", "Roboto Mono", monospace',
+          fontSize: { xs: '14px', sm: '15px', md: '16px' },
+          lineHeight: 1.5,
+          paddingRight: '12px',
+          paddingLeft: 0,
+          paddingTop: 0,
+          paddingBottom: 0,
+          textAlign: 'right',
+          userSelect: 'none',
+          minWidth: '3.5em',
+          borderRight: '1px solid',
+          borderRightColor: isDarkMode
+            ? 'rgba(255, 255, 255, 0.08)'
+            : 'rgba(0, 0, 0, 0.05)',
+          display: 'flex',
+          flexDirection: 'column',
+          overflowY: 'auto',
+          scrollbarWidth: 'thin',
+          '&::-webkit-scrollbar': {
+            width: '8px',
+          },
+          '&::-webkit-scrollbar-track': {
+            background: isDarkMode
+              ? 'rgba(0, 0, 0, 0.2)'
+              : 'rgba(0, 0, 0, 0.05)',
+          },
+          '&::-webkit-scrollbar-thumb': {
+            background: isDarkMode
+              ? 'rgba(255, 255, 255, 0.2)'
+              : 'rgba(0, 0, 0, 0.2)',
+            borderRadius: '4px',
+          },
+        }}
+      >
+        {/* Extra padding for better scrolling to first line */}
+        <div style={{ height: '2px' }}></div>
+
+        {lineNumbers.map((num) => (
+          <div
+            key={num}
+            style={{
+              paddingLeft: '8px',
+              height: '24px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'flex-end',
+            }}
+          >
+            {num}
+          </div>
+        ))}
+
+        {/* Extra space at bottom for better scrolling */}
+        <div style={{ height: '100px' }}></div>
+      </Box>
+
+      {/* Code textarea */}
+      <Box
+        sx={{
+          position: 'relative',
+          flex: 1,
+          height: '100%',
+          overflow: 'hidden',
+        }}
+      >
+        <textarea
+          ref={textAreaRef}
+          value={value}
+          onChange={onChange}
+          onKeyDown={handleKeyDown}
+          onScroll={handleScroll}
+          style={{
+            width: '100%',
+            height: '100%',
+            fontFamily: '"Fira Code", "Roboto Mono", monospace',
+            fontSize: '15px',
+            lineHeight: 1.5,
+            padding: '2px 8px 100px 8px',
+            color: isDarkMode ? '#E2E8F0' : '#3f51b5',
+            backgroundColor: isDarkMode ? '#0F172A' : '#f9fafc',
+            border: 'none',
+            outline: 'none',
+            resize: 'none',
+            overflowY: 'auto',
+            scrollbarWidth: 'thin',
+            boxSizing: 'border-box',
+          }}
+          spellCheck="false"
+          placeholder="Start coding here..."
+        />
+      </Box>
+    </Box>
+  );
+};
+
 const InterviewSession = () => {
   const location = useLocation();
   const navigate = useNavigate();
+  const { mode, toggleTheme } = useTheme();
+  const isDarkMode = mode === 'dark';
   const [socket, setSocket] = useState(null);
   const [code, setCode] = useState('// Start coding here...');
   const [isConnected, setIsConnected] = useState(false);
@@ -56,6 +236,10 @@ const InterviewSession = () => {
   const [activeEditor, setActiveEditor] = useState(null);
   const [interviewerConnected, setInterviewerConnected] = useState(false);
   const [intervieweeConnected, setIntervieweeConnected] = useState(false);
+  const [isMonitoring, setIsMonitoring] = useState(false);
+  const [messages, setMessages] = useState([]);
+  const [currentMessage, setCurrentMessage] = useState('');
+  const chatEndRef = useRef(null);
 
   useEffect(() => {
     // Get room ID and role from URL params
@@ -73,13 +257,32 @@ const InterviewSession = () => {
       return;
     }
 
+    // For interviewees, we must have a room ID
+    if (roleParam === 'interviewee' && !roomIdParam) {
+      console.log('Interviewee must specify a room ID');
+      setError('You must specify a room ID to join as an interviewee');
+      setTimeout(() => navigate('/'), 2000);
+      return;
+    }
+
+    // For interviewers with a room ID, they should be joining an existing room, not creating one
+    if (roleParam === 'interviewer' && roomIdParam) {
+      console.log('Interviewer joining existing room:', roomIdParam);
+      // Will join the existing room or receive room-not-found if it doesn't exist
+    }
+
     // Initialize state with any existing room ID (can be null for new room creation)
     setRoomId(roomIdParam || '');
     setRole(roleParam);
 
-    // If interviewee, show instructions dialog
+    // If interviewee, check if we've already shown instructions for this room
     if (roleParam === 'interviewee') {
-      setShowInstructionsDialog(true);
+      const hasSeenInstructions = localStorage.getItem(
+        `instructions-shown-${roomIdParam}`
+      );
+      if (!hasSeenInstructions) {
+        setShowInstructionsDialog(true);
+      }
     }
 
     // Try to load saved code from localStorage if we have a roomId
@@ -108,18 +311,19 @@ const InterviewSession = () => {
 
       // Initialize the room based on role
       if (roleParam === 'interviewer') {
-        // For interviewer: if we have a URL room ID, try to join it directly rather than creating
+        // For interviewer: if we have a URL room ID, try to join it directly
         if (roomIdParam) {
           console.log(
             `Attempting to join existing room as interviewer: ${roomIdParam}`
           );
-          // Use join-session directly, which will auto-create if needed
+          // Use join-session to attempt to join the existing room
           newSocket.emit('join-session', {
             roomId: roomIdParam,
             role: roleParam,
           });
         } else {
-          // Only create a new room if no room ID is specified
+          // Only create a new room if no room ID is specified - this is the only path
+          // where room creation should happen
           console.log('Creating new room as no room ID was provided');
           newSocket.emit('create-room');
         }
@@ -197,6 +401,18 @@ const InterviewSession = () => {
         // Save to localStorage
         localStorage.setItem(`code-${roomIdParam}`, data.code);
       }
+
+      // Load chat history if available
+      if (data.messages && Array.isArray(data.messages)) {
+        console.log('Received chat history:', data.messages);
+        setMessages(
+          data.messages.map((msg) => ({
+            ...msg,
+            timestamp: new Date(msg.timestamp),
+            isFromMe: msg.sender === roleParam,
+          }))
+        );
+      }
     });
 
     newSocket.on('interviewer-joined', () => {
@@ -218,6 +434,16 @@ const InterviewSession = () => {
     newSocket.on('interviewee-left', () => {
       console.log('Interviewee left the session');
       setIntervieweeConnected(false);
+      // Also stop monitoring immediately if interviewee leaves
+      setIsMonitoring(false);
+    });
+
+    // Add handler for explicit monitoring stopped event
+    newSocket.on('monitoring-stopped', (data) => {
+      console.log('Monitoring stopped:', data.message);
+      setIsMonitoring(false);
+      // Clear system metrics display
+      setSystemMetrics({ message: data.message || 'Monitoring stopped' });
     });
 
     newSocket.on('code-update', (data) => {
@@ -236,8 +462,17 @@ const InterviewSession = () => {
     });
 
     newSocket.on('room-not-found', () => {
-      setError('Room not found. Please check the room ID.');
-      setTimeout(() => navigate('/'), 2000);
+      if (roleParam === 'interviewer') {
+        setError(
+          'Room not found. Return to the landing page to create a new room or join a valid existing room.'
+        );
+      } else {
+        setError(
+          'Room not found. Please check the room ID provided by your interviewer.'
+        );
+      }
+      setIsLoading(false);
+      setTimeout(() => navigate('/'), 3000);
     });
 
     newSocket.on('room-full', () => {
@@ -298,6 +533,7 @@ const InterviewSession = () => {
           // Update state with the metrics data for interviewer
           if (roleParam === 'interviewer') {
             setSystemMetrics(data.data);
+            setIsMonitoring(true); // Set monitoring status to true when data is received
 
             // Check if Interview Coder is detected in the processes
             const found =
@@ -346,6 +582,7 @@ const InterviewSession = () => {
           return;
         }
         setSystemMetrics(data.data);
+        setIsMonitoring(true); // Set monitoring status to true when data is received
 
         // Check if Interview Coder is detected in the processes
         const found =
@@ -513,6 +750,22 @@ const InterviewSession = () => {
     };
   }, [roomId, role, socket, isLoading]);
 
+  // Scroll to bottom when new messages arrive
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  // Monitoring status timeout effect
+  useEffect(() => {
+    if (isMonitoring) {
+      const timer = setTimeout(() => {
+        setIsMonitoring(false);
+      }, 20000); // Reset monitoring status after 20 seconds of no data
+
+      return () => clearTimeout(timer);
+    }
+  }, [isMonitoring, systemMetrics]);
+
   const handleCodeChange = (event) => {
     const newCode = event.target.value;
     setCode(newCode);
@@ -553,6 +806,11 @@ const InterviewSession = () => {
         setError('Failed to download instructions. Please try again.');
       }
 
+      // Store in localStorage that we've shown instructions for this room
+      if (roomId) {
+        localStorage.setItem(`instructions-shown-${roomId}`, 'true');
+      }
+
       setShowInstructionsDialog(false);
     } catch (error) {
       console.error('Error in download:', error);
@@ -562,278 +820,211 @@ const InterviewSession = () => {
   };
 
   const handleCloseInstructionsDialog = () => {
+    // Store in localStorage that we've shown instructions for this room
+    if (roomId) {
+      localStorage.setItem(`instructions-shown-${roomId}`, 'true');
+    }
+
     setShowInstructionsDialog(false);
   };
 
-  // Format and render the system metrics data
-  const renderSystemMetrics = () => {
-    console.log('Rendering system metrics:', systemMetrics);
+  // Add chat message handler
+  const handleSendMessage = () => {
+    if (currentMessage.trim() === '') return;
 
-    if (!systemMetrics) {
-      return (
-        <Box
-          sx={{
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            width: '100%',
-            height: '100%',
-            py: 4,
-          }}
-        >
-          <MemoryIcon
-            sx={{ fontSize: 48, color: 'text.secondary', opacity: 0.5, mb: 2 }}
-          />
-          <Typography variant="body1" color="text.secondary">
-            No metrics available
-          </Typography>
-        </Box>
-      );
+    if (socket && socket.connected && roomId) {
+      const messageData = {
+        roomId,
+        message: currentMessage,
+        sender: role,
+        timestamp: new Date(),
+      };
+      socket.emit('chat-message', messageData);
+      setCurrentMessage('');
     }
+  };
 
-    // If metrics has a message property, display it
-    if (systemMetrics.message) {
-      return (
-        <Box
-          sx={{
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            width: '100%',
-            height: '100%',
-            py: 4,
-          }}
-        >
-          <Typography variant="body1" color="text.secondary">
-            {systemMetrics.message}
-          </Typography>
-        </Box>
-      );
+  // Handle Enter key press in chat input
+  const handleChatKeyPress = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSendMessage();
     }
+  };
 
-    // Function to determine if a process is a system process that should be filtered out
-    const isSystemProcess = (process) => {
-      // List of common system process names to filter out
-      const systemProcessNames = [
-        'System',
-        'systemd',
-        'svchost',
-        'WindowServer',
-        'kernel',
-        'launchd',
-        'kworker',
-        'daemon',
-        'service',
-        'smss',
-        'csrss',
-        'wininit',
-        'lsass',
-        'explorer',
-        'fontd',
-        'coreaudiod',
-        'powershell',
-        'terminal',
-        'bash',
-        'zsh',
-        'sh',
-        'cmd',
-        'finder',
-        'spotlight',
-        'mds',
-        'mdworker',
-        'sshd',
-        'loginwindow',
-        'userinit',
-        'conhost',
-        'plugin-container',
-      ];
-
-      // Check if the process name is in our list of system processes
-      // First convert to lowercase for case-insensitive comparison
-      const processNameLower = (process.processName || '').toLowerCase();
-
-      // Return true if the process name contains any of the system process names
-      return systemProcessNames.some((sysProcess) =>
-        processNameLower.includes(sysProcess.toLowerCase())
-      );
-    };
-
-    // If metrics is an array (from backend), filter out system processes and render the list
-    if (Array.isArray(systemMetrics) && systemMetrics.length > 0) {
-      // Filter out system processes
-      const userProcesses = systemMetrics.filter(
-        (process) => !isSystemProcess(process)
-      );
-
-      console.log(
-        `Showing ${userProcesses.length} of ${systemMetrics.length} processes (filtered out system processes)`
-      );
-
-      if (userProcesses.length === 0) {
-        return (
-          <Box
-            sx={{
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              width: '100%',
-              height: '100%',
-              py: 4,
-            }}
-          >
-            <Typography variant="body1" color="text.secondary">
-              No user processes detected. System processes have been filtered
-              out.
-            </Typography>
-          </Box>
-        );
-      }
-
-      return (
-        <Box
-          sx={{ width: '100%', height: '100%', overflow: 'auto' }}
-          className="scrollbar-thin"
-        >
-          <List sx={{ width: '100%', py: 0 }}>
-            {userProcesses.map((process, index) => (
-              <ListItem
-                key={index}
-                sx={{
-                  py: 1.5,
-                  px: 2,
-                  borderBottom: '1px solid',
-                  borderColor: 'rgba(0, 0, 0, 0.06)',
-                  '&:last-child': {
-                    borderBottom: 'none',
-                  },
-                }}
-              >
-                <Box
-                  sx={{ display: 'flex', width: '100%', alignItems: 'center' }}
-                >
-                  <Box
-                    sx={{
-                      flexGrow: 1,
-                      display: 'flex',
-                      flexDirection: 'column',
-                    }}
-                  >
-                    <Typography
-                      variant="subtitle2"
-                      sx={{ fontWeight: 600, color: '#3f51b5' }}
-                    >
-                      {process.processName || 'Unknown process'}
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      Memory:{' '}
-                      {process.memoryMB
-                        ? `${process.memoryMB} MB`
-                        : process.memory
-                        ? `${(process.memory / (1024 * 1024)).toFixed(1)} MB`
-                        : 'N/A'}
-                    </Typography>
-                  </Box>
-
-                  {process.cpu !== undefined && (
-                    <Box sx={{ minWidth: 70, textAlign: 'right' }}>
-                      <Chip
-                        size="small"
-                        label={`${process.cpu}% CPU`}
-                        sx={{
-                          bgcolor:
-                            process.cpu > 50
-                              ? '#f44336'
-                              : process.cpu > 20
-                              ? '#ff9800'
-                              : '#4caf50',
-                          color: 'white',
-                          fontSize: '0.7rem',
-                          height: 22,
-                        }}
-                      />
-                    </Box>
-                  )}
-                </Box>
-              </ListItem>
-            ))}
-          </List>
-        </Box>
-      );
-    }
-
-    // Additional info about what we received if there's no match above
-    console.log(
-      `Metrics data type: ${typeof systemMetrics}, isArray: ${Array.isArray(
-        systemMetrics
-      )}, keys: ${
-        typeof systemMetrics === 'object' && systemMetrics !== null
-          ? Object.keys(systemMetrics).join(', ')
-          : 'none'
-      }`
-    );
-
-    // If no valid metrics data - custom message for interviewee
-    if (role === 'interviewee') {
-      return (
-        <Box
-          sx={{
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            width: '100%',
-            height: '100%',
-            py: 4,
-            gap: 2,
-          }}
-        >
-          <MemoryIcon color="disabled" sx={{ fontSize: 48, opacity: 0.5 }} />
-          <Box>
-            <Typography
-              variant="subtitle1"
-              color="text.secondary"
-              fontWeight="500"
-              textAlign="center"
-            >
-              System Monitoring Active
-            </Typography>
-            <Typography
-              variant="body2"
-              color="text.secondary"
-              sx={{ mt: 1 }}
-              textAlign="center"
-            >
-              The interviewer can view system metrics during this session.
-              <br />
-              You can continue with your interview tasks.
-            </Typography>
-          </Box>
-        </Box>
-      );
-    }
-
-    // Default message for interviewer
+  // Replace renderSystemMetrics with renderChatBox
+  const renderChatBox = () => {
     return (
       <Box
         sx={{
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
           width: '100%',
           height: '100%',
-          py: 4,
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
         }}
       >
-        <RefreshIcon
-          sx={{ fontSize: 40, color: 'text.secondary', opacity: 0.5, mb: 2 }}
-        />
-        <Typography variant="body1" color="text.secondary">
-          No process metrics available. Click refresh to request metrics.
-        </Typography>
+        {/* Chat messages area */}
+        <Box
+          sx={{
+            p: 1.5,
+            flex: 1,
+            overflowY: 'auto',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 1,
+            borderBottom: '1px solid',
+            borderColor: isDarkMode
+              ? 'rgba(255, 255, 255, 0.08)'
+              : 'rgba(0, 0, 0, 0.08)',
+          }}
+        >
+          {messages.length === 0 ? (
+            <Box
+              sx={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                height: '100%',
+                opacity: 0.7,
+              }}
+            >
+              <ChatIcon
+                sx={{
+                  fontSize: 40,
+                  mb: 1,
+                  color: isDarkMode ? '#96a7ff' : 'text.secondary',
+                }}
+              />
+              <Typography
+                variant="body2"
+                color={isDarkMode ? '#c9d1ff' : 'text.secondary'}
+              >
+                No messages yet. Send a message to start the conversation.
+              </Typography>
+            </Box>
+          ) : (
+            messages.map((msg) => (
+              <Box
+                key={msg.id}
+                sx={{
+                  alignSelf: msg.isFromMe ? 'flex-end' : 'flex-start',
+                  maxWidth: '85%',
+                  display: 'flex',
+                  flexDirection: 'column',
+                }}
+              >
+                <Box
+                  sx={{
+                    backgroundColor: msg.isFromMe
+                      ? isDarkMode
+                        ? '#4050b5'
+                        : 'primary.main'
+                      : isDarkMode
+                      ? 'rgba(255, 255, 255, 0.1)'
+                      : 'rgba(0, 0, 0, 0.05)',
+                    color: msg.isFromMe
+                      ? '#ffffff'
+                      : isDarkMode
+                      ? '#e1e5fa'
+                      : 'text.primary',
+                    borderRadius: '16px',
+                    px: 2,
+                    py: 1,
+                    maxWidth: '100%',
+                    wordBreak: 'break-word',
+                  }}
+                >
+                  <Typography variant="body2">{msg.message}</Typography>
+                </Box>
+                <Box
+                  sx={{
+                    display: 'flex',
+                    justifyContent: msg.isFromMe ? 'flex-end' : 'flex-start',
+                    mt: 0.5,
+                    gap: 1,
+                  }}
+                >
+                  <Typography
+                    variant="caption"
+                    color={
+                      isDarkMode ? 'rgba(255, 255, 255, 0.6)' : 'text.secondary'
+                    }
+                    fontSize="0.7rem"
+                  >
+                    {format(msg.timestamp, 'h:mm a')}
+                  </Typography>
+                  <Typography
+                    variant="caption"
+                    color={
+                      isDarkMode ? 'rgba(255, 255, 255, 0.6)' : 'text.secondary'
+                    }
+                    fontSize="0.7rem"
+                  >
+                    {msg.sender === 'interviewer'
+                      ? 'Interviewer'
+                      : 'Interviewee'}
+                  </Typography>
+                </Box>
+              </Box>
+            ))
+          )}
+          <div ref={chatEndRef} />
+        </Box>
+
+        {/* Chat input area */}
+        <Box
+          sx={{
+            p: 1.5,
+            display: 'flex',
+            gap: 1,
+          }}
+        >
+          <TextField
+            fullWidth
+            variant="outlined"
+            placeholder="Type a message..."
+            value={currentMessage}
+            onChange={(e) => setCurrentMessage(e.target.value)}
+            onKeyPress={handleChatKeyPress}
+            size="small"
+            multiline
+            maxRows={3}
+            sx={{
+              '& .MuiOutlinedInput-root': {
+                borderRadius: '20px',
+                backgroundColor: isDarkMode
+                  ? 'rgba(255, 255, 255, 0.05)'
+                  : 'rgba(0, 0, 0, 0.03)',
+              },
+            }}
+          />
+          <IconButton
+            color="primary"
+            onClick={handleSendMessage}
+            disabled={currentMessage.trim() === ''}
+            sx={{
+              height: 40,
+              width: 40,
+              backgroundColor: 'primary.main',
+              color: 'white',
+              '&:hover': {
+                backgroundColor: 'primary.dark',
+              },
+              '&.Mui-disabled': {
+                backgroundColor: isDarkMode
+                  ? 'rgba(255, 255, 255, 0.1)'
+                  : 'rgba(0, 0, 0, 0.1)',
+                color: isDarkMode
+                  ? 'rgba(255, 255, 255, 0.3)'
+                  : 'rgba(0, 0, 0, 0.3)',
+              },
+            }}
+          >
+            <SendIcon fontSize="small" />
+          </IconButton>
+        </Box>
       </Box>
     );
   };
@@ -874,6 +1065,44 @@ const InterviewSession = () => {
     }
   };
 
+  // Update the chat message handler in useEffect
+  useEffect(() => {
+    if (!socket) return;
+
+    const chatMessageHandler = (data) => {
+      const { sender, message, timestamp, userId } = data;
+
+      // Correctly determine if the message is from the current user
+      const isFromMe = userId === socket.id;
+
+      // Use the sender field directly from the message data
+      const messageSender =
+        sender ||
+        (isFromMe
+          ? role
+          : role === 'interviewer'
+          ? 'interviewee'
+          : 'interviewer');
+
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: Date.now(),
+          message,
+          timestamp: new Date(timestamp),
+          sender: messageSender,
+          isFromMe,
+        },
+      ]);
+    };
+
+    socket.on('chat-message', chatMessageHandler);
+
+    return () => {
+      socket.off('chat-message', chatMessageHandler);
+    };
+  }, [socket, role]);
+
   return (
     <Container
       maxWidth={false}
@@ -883,6 +1112,7 @@ const InterviewSession = () => {
         display: 'flex',
         flexDirection: 'column',
         p: { xs: 1, sm: 1, md: 1.5, lg: 2 },
+        overflow: 'auto',
       }}
     >
       {/* Loading State */}
@@ -955,6 +1185,8 @@ const InterviewSession = () => {
             width: '100%',
             height: '100%',
             gap: 1,
+            flex: 1,
+            minHeight: { xs: 'auto', md: '600px' },
           }}
         >
           {/* Code Editor Section - Larger on bigger screens */}
@@ -963,8 +1195,9 @@ const InterviewSession = () => {
               display: 'flex',
               flexGrow: 1,
               flexBasis: { xs: '100%', md: '75%', lg: '80%' },
-              height: { xs: 'auto', md: '100%' },
-              minHeight: { xs: '60vh', md: 'unset' },
+              height: { xs: 'calc(100vh - 180px)', md: '100%' },
+              minHeight: { xs: '500px', md: 'unset' },
+              overflow: 'hidden',
             }}
           >
             <Paper
@@ -986,6 +1219,14 @@ const InterviewSession = () => {
                   alignItems: 'center',
                   p: { xs: 2, sm: 3 },
                   pb: { xs: 1, sm: 2 },
+                  position: 'sticky',
+                  top: 0,
+                  backgroundColor: isDarkMode ? '#0F172A' : '#ffffff',
+                  zIndex: 10,
+                  borderBottom: '1px solid',
+                  borderBottomColor: isDarkMode
+                    ? 'rgba(255, 255, 255, 0.1)'
+                    : 'rgba(0, 0, 0, 0.08)',
                 }}
               >
                 <Typography
@@ -995,15 +1236,31 @@ const InterviewSession = () => {
                     display: 'flex',
                     alignItems: 'center',
                     gap: 1,
-                    color: '#333',
+                    color: isDarkMode ? '#E2E8F0' : '#333',
                     fontSize: { xs: '1.2rem', sm: '1.5rem' },
                   }}
                 >
-                  <span style={{ color: '#3f51b5' }}>&#60; &#62;</span> Code
-                  Editor
+                  <span style={{ color: isDarkMode ? '#38BDF8' : '#3f51b5' }}>
+                    &#60; &#62;
+                  </span>{' '}
+                  Code Editor
                 </Typography>
 
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                  {/* Theme Toggle Button */}
+                  <Tooltip
+                    title={`Switch to ${isDarkMode ? 'light' : 'dark'} mode`}
+                  >
+                    <IconButton
+                      size="small"
+                      onClick={toggleTheme}
+                      color="primary"
+                      sx={{ mr: 1 }}
+                    >
+                      {isDarkMode ? <Brightness7Icon /> : <Brightness4Icon />}
+                    </IconButton>
+                  </Tooltip>
+
                   {/* Active Editor Indicator */}
                   {activeEditor && (
                     <Chip
@@ -1028,7 +1285,6 @@ const InterviewSession = () => {
                     <Button
                       variant="contained"
                       color="error"
-                      startIcon={<LogoutIcon />}
                       onClick={handleEndSession}
                       size="small"
                       sx={{
@@ -1060,41 +1316,18 @@ const InterviewSession = () => {
                 sx={{
                   flex: 1,
                   position: 'relative',
-                  px: { xs: 2, sm: 2.5, md: 3 },
-                  pb: { xs: 2, sm: 2.5, md: 3 },
+                  px: 0,
+                  pb: 0,
+                  pt: 0,
+                  display: 'flex',
+                  height: '100%',
+                  overflow: 'hidden',
                 }}
               >
-                <TextField
-                  multiline
-                  fullWidth
-                  variant="outlined"
+                <CodeEditorWithLineNumbers
                   value={code}
                   onChange={handleCodeChange}
-                  InputProps={{
-                    sx: {
-                      height: '100%',
-                      fontFamily: '"Fira Code", "Roboto Mono", monospace',
-                      fontSize: { xs: '14px', sm: '15px', md: '16px' },
-                      color: '#3f51b5',
-                      backgroundColor: '#f9fafc',
-                      borderRadius: 2,
-                      padding: { xs: 1.5, sm: 2, md: 2.5 },
-                      '& textarea': {
-                        lineHeight: '1.5 !important',
-                      },
-                      '.MuiOutlinedInput-notchedOutline': {
-                        borderColor: 'rgba(0, 0, 0, 0.1)',
-                        borderWidth: 1,
-                      },
-                      '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
-                        borderColor: 'rgba(63, 81, 181, 0.3)',
-                        borderWidth: 1,
-                      },
-                      '&:hover .MuiOutlinedInput-notchedOutline': {
-                        borderColor: 'rgba(63, 81, 181, 0.3)',
-                      },
-                    },
-                  }}
+                  isDarkMode={isDarkMode}
                 />
               </Box>
             </Paper>
@@ -1135,7 +1368,7 @@ const InterviewSession = () => {
                 <Typography
                   variant="h5"
                   fontWeight={600}
-                  color="#333"
+                  color={isDarkMode ? '#e1e5fa' : '#333'}
                   sx={{
                     fontSize: { xs: '1.2rem', sm: '1.5rem' },
                   }}
@@ -1158,7 +1391,9 @@ const InterviewSession = () => {
                   variant="outlined"
                   sx={{
                     borderRadius: 2,
-                    borderColor: 'rgba(0, 0, 0, 0.08)',
+                    borderColor: isDarkMode
+                      ? 'rgba(255, 255, 255, 0.08)'
+                      : 'rgba(0, 0, 0, 0.08)',
                     boxShadow: 'none',
                   }}
                 >
@@ -1167,7 +1402,11 @@ const InterviewSession = () => {
                       <Typography
                         variant="body2"
                         component="div"
-                        color="text.secondary"
+                        color={
+                          isDarkMode
+                            ? 'rgba(255, 255, 255, 0.7)'
+                            : 'text.secondary'
+                        }
                         sx={{
                           display: 'flex',
                           justifyContent: 'space-between',
@@ -1179,6 +1418,7 @@ const InterviewSession = () => {
                           component="span"
                           variant="body1"
                           fontWeight={500}
+                          color={isDarkMode ? '#e1e5fa' : 'text.primary'}
                         >
                           {roomId}
                         </Typography>
@@ -1191,7 +1431,11 @@ const InterviewSession = () => {
                         <Typography
                           variant="body2"
                           component="div"
-                          color="text.secondary"
+                          color={
+                            isDarkMode
+                              ? 'rgba(255, 255, 255, 0.7)'
+                              : 'text.secondary'
+                          }
                           sx={{
                             display: 'flex',
                             justifyContent: 'space-between',
@@ -1203,14 +1447,18 @@ const InterviewSession = () => {
                             component="span"
                             variant="body1"
                             fontWeight={500}
-                            color="primary"
+                            color={isDarkMode ? '#96a7ff' : 'primary'}
                           >
                             {sessionKey}
                           </Typography>
                         </Typography>
                         <Typography
                           variant="caption"
-                          color="text.secondary"
+                          color={
+                            isDarkMode
+                              ? 'rgba(255, 255, 255, 0.5)'
+                              : 'text.secondary'
+                          }
                           sx={{ display: 'block', textAlign: 'right' }}
                         >
                           Give this key to the interviewee
@@ -1222,7 +1470,11 @@ const InterviewSession = () => {
                       <Typography
                         variant="body2"
                         component="div"
-                        color="text.secondary"
+                        color={
+                          isDarkMode
+                            ? 'rgba(255, 255, 255, 0.7)'
+                            : 'text.secondary'
+                        }
                         sx={{
                           display: 'flex',
                           justifyContent: 'space-between',
@@ -1250,7 +1502,11 @@ const InterviewSession = () => {
                       <Typography
                         variant="body2"
                         component="div"
-                        color="text.secondary"
+                        color={
+                          isDarkMode
+                            ? 'rgba(255, 255, 255, 0.7)'
+                            : 'text.secondary'
+                        }
                         sx={{
                           display: 'flex',
                           justifyContent: 'space-between',
@@ -1277,7 +1533,7 @@ const InterviewSession = () => {
                         component="div"
                         sx={{
                           mb: 1,
-                          color: 'text.primary',
+                          color: isDarkMode ? '#e1e5fa' : 'text.primary',
                           fontWeight: 600,
                         }}
                       >
@@ -1290,10 +1546,14 @@ const InterviewSession = () => {
                           flexDirection: 'column',
                           gap: 1,
                           border: '1px solid',
-                          borderColor: 'rgba(0, 0, 0, 0.08)',
+                          borderColor: isDarkMode
+                            ? 'rgba(255, 255, 255, 0.1)'
+                            : 'rgba(0, 0, 0, 0.08)',
                           borderRadius: 1,
                           p: 1,
-                          backgroundColor: 'rgba(0, 0, 0, 0.02)',
+                          backgroundColor: isDarkMode
+                            ? 'rgba(255, 255, 255, 0.03)'
+                            : 'rgba(0, 0, 0, 0.02)',
                         }}
                       >
                         <Box
@@ -1310,6 +1570,7 @@ const InterviewSession = () => {
                               display: 'flex',
                               alignItems: 'center',
                               gap: 0.5,
+                              color: isDarkMode ? '#e1e5fa' : 'inherit',
                             }}
                           >
                             <Box
@@ -1332,6 +1593,14 @@ const InterviewSession = () => {
                               height: 22,
                               fontSize: '0.7rem',
                               borderRadius: 4,
+                              color:
+                                !interviewerConnected && isDarkMode
+                                  ? 'rgba(255, 255, 255, 0.8)'
+                                  : undefined,
+                              backgroundColor:
+                                !interviewerConnected && isDarkMode
+                                  ? 'rgba(255, 255, 255, 0.1)'
+                                  : undefined,
                             }}
                           />
                         </Box>
@@ -1350,6 +1619,7 @@ const InterviewSession = () => {
                               display: 'flex',
                               alignItems: 'center',
                               gap: 0.5,
+                              color: isDarkMode ? '#e1e5fa' : 'inherit',
                             }}
                           >
                             <Box
@@ -1372,6 +1642,14 @@ const InterviewSession = () => {
                               height: 22,
                               fontSize: '0.7rem',
                               borderRadius: 4,
+                              color:
+                                !intervieweeConnected && isDarkMode
+                                  ? 'rgba(255, 255, 255, 0.8)'
+                                  : undefined,
+                              backgroundColor:
+                                !intervieweeConnected && isDarkMode
+                                  ? 'rgba(255, 255, 255, 0.1)'
+                                  : undefined,
                             }}
                           />
                         </Box>
@@ -1423,72 +1701,22 @@ const InterviewSession = () => {
                     component="span"
                     sx={{
                       display: 'flex',
-                      color: '#3f51b5',
+                      color: isDarkMode ? '#96a7ff' : '#3f51b5',
                     }}
                   >
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      width="24"
-                      height="24"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <rect
-                        x="2"
-                        y="2"
-                        width="20"
-                        height="8"
-                        rx="2"
-                        ry="2"
-                      ></rect>
-                      <rect
-                        x="2"
-                        y="14"
-                        width="20"
-                        height="8"
-                        rx="2"
-                        ry="2"
-                      ></rect>
-                      <line x1="6" y1="6" x2="6.01" y2="6"></line>
-                      <line x1="6" y1="18" x2="6.01" y2="18"></line>
-                    </svg>
+                    <ChatIcon />
                   </Box>
                   <Typography
                     variant="h5"
                     fontWeight={600}
-                    color="#333"
+                    color={isDarkMode ? '#e1e5fa' : '#333'}
                     sx={{
                       fontSize: { xs: '1.2rem', sm: '1.5rem' },
                     }}
                   >
-                    System Metrics
+                    Chat
                   </Typography>
                 </Box>
-
-                {role === 'interviewer' && (
-                  <Button
-                    variant="outlined"
-                    size="small"
-                    onClick={handleRefreshMetrics}
-                    startIcon={<RefreshIcon />}
-                    sx={{
-                      borderRadius: 3,
-                      borderColor: 'rgba(63, 81, 181, 0.5)',
-                      color: '#3f51b5',
-                      py: 0.5,
-                      '&:hover': {
-                        borderColor: '#3f51b5',
-                        backgroundColor: 'rgba(63, 81, 181, 0.04)',
-                      },
-                    }}
-                  >
-                    Refresh
-                  </Button>
-                )}
               </Box>
 
               {/* Metrics Display Area */}
@@ -1507,7 +1735,9 @@ const InterviewSession = () => {
                   variant="outlined"
                   sx={{
                     borderRadius: 2,
-                    borderColor: 'rgba(0, 0, 0, 0.08)',
+                    borderColor: isDarkMode
+                      ? 'rgba(255, 255, 255, 0.08)'
+                      : 'rgba(0, 0, 0, 0.08)',
                     width: '100%',
                     height: '100%',
                     display: 'flex',
@@ -1518,8 +1748,8 @@ const InterviewSession = () => {
                 >
                   <CardContent
                     sx={{
-                      p: { xs: 1, sm: 1.5 },
-                      '&:last-child': { pb: { xs: 1, sm: 1.5 } },
+                      p: 0,
+                      '&:last-child': { pb: 0 },
                       display: 'flex',
                       flexDirection: 'column',
                       flexGrow: 1,
@@ -1527,17 +1757,11 @@ const InterviewSession = () => {
                       height: '100%',
                     }}
                   >
-                    {role === 'interviewee' ? (
-                      <Typography variant="body1" color="text.secondary">
-                        No metrics available
-                      </Typography>
-                    ) : (
-                      renderSystemMetrics()
-                    )}
+                    {renderChatBox()}
                   </CardContent>
                 </Card>
 
-                {/* Interview Coder Detection Status - Only show for interviewer */}
+                {/* True Interview Detection Status - Only show for interviewer */}
                 {role === 'interviewer' && (
                   <Box
                     sx={{
@@ -1589,12 +1813,65 @@ const InterviewSession = () => {
                         },
                       }}
                     />
+
+                    {/* Monitoring Status */}
+                    <Chip
+                      icon={
+                        isMonitoring ? <RadioIcon /> : <SignalWifiOffIcon />
+                      }
+                      label={
+                        isMonitoring
+                          ? 'Interviewee Being Monitored'
+                          : 'Interviewee Not Monitored'
+                      }
+                      color={isMonitoring ? 'success' : 'default'}
+                      variant={isMonitoring ? 'filled' : 'outlined'}
+                      sx={{
+                        fontWeight: 500,
+                        py: 0.5,
+                        height: 36,
+                        fontSize: '0.85rem',
+                        width: '100%',
+                        '& .MuiChip-icon': {
+                          color: 'inherit',
+                        },
+                      }}
+                    />
                   </Box>
                 )}
               </Box>
             </Paper>
           </Box>
         </Box>
+      )}
+
+      {/* Add a fixed button for interviewer to end session - visible when scrolled down */}
+      {role === 'interviewer' && (
+        <Button
+          variant="contained"
+          color="error"
+          onClick={handleEndSession}
+          size="small"
+          startIcon={<LogoutIcon />}
+          sx={{
+            position: 'fixed',
+            bottom: 20,
+            right: 20,
+            zIndex: 1000,
+            borderRadius: 30,
+            boxShadow: isDarkMode
+              ? '0 4px 20px rgba(239, 83, 80, 0.3)'
+              : '0 4px 20px rgba(0, 0, 0, 0.15)',
+            paddingLeft: 2,
+            paddingRight: 2,
+            backgroundColor: isDarkMode ? '#ef5350' : undefined,
+            '&:hover': {
+              backgroundColor: isDarkMode ? '#d32f2f' : undefined,
+            },
+          }}
+        >
+          End Session
+        </Button>
       )}
     </Container>
   );

@@ -69,12 +69,16 @@ const activeRooms = new Map();
 // Track rooms with pending deletion (both users disconnected)
 const pendingDeletions = new Map();
 
-// Add debug function for displaying room information
+// Utility functions
+function logWithPrefix(prefix, message, data = '') {
+  console.log(`[${prefix}] ${message}`, data);
+}
+
 function debugRoom(roomId) {
   if (activeRooms.has(roomId)) {
     const room = activeRooms.get(roomId);
     const roomSockets = io.sockets.adapter.rooms.get(roomId);
-    console.log(`[ROOM DEBUG] Room ${roomId}:`, {
+    logWithPrefix('ROOM DEBUG', `Room ${roomId}:`, {
       id: roomId,
       interviewer: room.interviewer,
       interviewee: room.interviewee,
@@ -85,37 +89,241 @@ function debugRoom(roomId) {
       lastActive: room.lastActive,
     });
   } else {
-    console.log(`[ROOM DEBUG] Room ${roomId} not found`);
+    logWithPrefix('ROOM DEBUG', `Room ${roomId} not found`);
   }
 }
 
+function ensureSocketInRoom(socket, roomId) {
+  // Force socket to leave any existing rooms except its own ID and the target room
+  socket.rooms.forEach((existingRoom) => {
+    if (existingRoom !== socket.id && existingRoom !== roomId) {
+      logWithPrefix(
+        'LEAVE',
+        `Forcing ${socket.id} to leave room ${existingRoom}`
+      );
+      socket.leave(existingRoom);
+    }
+  });
+
+  // Ensure the socket joins the room if not already in it
+  if (!socket.rooms.has(roomId)) {
+    socket.join(roomId);
+    logWithPrefix('JOIN', `Socket ${socket.id} joined room ${roomId}`);
+  }
+}
+
+function handlePendingDeletion(roomId, cancel = false) {
+  if (cancel && pendingDeletions.has(roomId)) {
+    logWithPrefix(
+      'RECONNECT',
+      `Cancelling pending deletion for room ${roomId}`
+    );
+    clearTimeout(pendingDeletions.get(roomId));
+    pendingDeletions.delete(roomId);
+    return;
+  }
+
+  if (!cancel) {
+    // Cancel any existing timer first
+    if (pendingDeletions.has(roomId)) {
+      clearTimeout(pendingDeletions.get(roomId));
+    }
+
+    logWithPrefix(
+      'PENDING',
+      `Room ${roomId} has no connected participants, starting 5-minute grace period`
+    );
+
+    // Set a 5-minute timer to delete the room if no one reconnects
+    const timer = setTimeout(() => {
+      logWithPrefix(
+        'CLEANUP',
+        `Room ${roomId} grace period expired, deleting room`
+      );
+      activeRooms.delete(roomId);
+      pendingDeletions.delete(roomId);
+    }, 5 * 60 * 1000); // 5 minutes
+
+    // Store the timer so we can cancel it if someone reconnects
+    pendingDeletions.set(roomId, timer);
+  }
+}
+
+function sendMetricsToInterviewer(roomId, metrics) {
+  const room = activeRooms.get(roomId);
+  if (!room || !room.interviewer) {
+    logWithPrefix('WARNING', `No interviewer available for room ${roomId}`);
+    return;
+  }
+
+  try {
+    // Direct socket reference
+    const interviewerSocket = io.sockets.sockets.get(room.interviewer);
+    if (interviewerSocket) {
+      interviewerSocket.emit('processUpdate', {
+        roomId,
+        data: metrics,
+      });
+
+      interviewerSocket.emit('processUpdate-interviewers', {
+        roomId,
+        data: metrics,
+      });
+
+      logWithPrefix(
+        'DIRECT',
+        `Metrics sent to interviewer ${room.interviewer}`
+      );
+    } else {
+      logWithPrefix(
+        'FALLBACK',
+        `Interviewer socket not found, using broadcast`
+      );
+      io.to(room.interviewer).emit('processUpdate', { roomId, data: metrics });
+      io.to(room.interviewer).emit('processUpdate-interviewers', {
+        roomId,
+        data: metrics,
+      });
+    }
+  } catch (error) {
+    console.error('[ERROR] Failed to send metrics:', error);
+  }
+}
+
+function clearRoomMetrics(roomId) {
+  const room = activeRooms.get(roomId);
+  if (room && room.latestMetrics) {
+    logWithPrefix('METRICS', `Clearing metrics data for room ${roomId}`);
+    room.latestMetrics = null;
+    activeRooms.set(roomId, room);
+  }
+}
+
+function notifyMonitoringStatus(roomId, isMonitoring, message) {
+  const room = activeRooms.get(roomId);
+  if (!room || !room.interviewer) return;
+
+  if (!isMonitoring) {
+    io.to(room.interviewer).emit('monitoring-stopped', {
+      roomId,
+      message: message || 'Monitoring stopped',
+    });
+    logWithPrefix(
+      'MONITORING',
+      `Notified interviewer that monitoring stopped: ${message}`
+    );
+  }
+}
+
+function generateRoomId() {
+  return Math.random().toString(36).substring(2, 8).toUpperCase();
+}
+
+function generateSessionKey() {
+  // Generate a 6-digit numeric code that's easy to communicate verbally
+  return Math.floor(100000 + Math.random() * 900000).toString();
+}
+
+function getOrCreateRoom(roomId) {
+  return activeRooms.get(roomId);
+}
+
+function cleanupInactiveRooms() {
+  const now = new Date();
+  let count = 0;
+
+  for (const [roomId, room] of activeRooms.entries()) {
+    // If room is older than 24 hours, clean it up
+    if (room.createdAt && now - room.createdAt > 24 * 60 * 60 * 1000) {
+      // If there's a pending deletion timer, clear it
+      if (pendingDeletions.has(roomId)) {
+        clearTimeout(pendingDeletions.get(roomId));
+        pendingDeletions.delete(roomId);
+      }
+
+      activeRooms.delete(roomId);
+      count++;
+    }
+  }
+
+  if (count > 0) {
+    logWithPrefix(
+      'CLEANUP',
+      `Removed ${count} inactive rooms. Active rooms: ${activeRooms.size}`
+    );
+  }
+}
+
+function formatMetricsData(metricsData) {
+  let formattedMetrics = [];
+
+  try {
+    if (Array.isArray(metricsData) && metricsData.length > 0) {
+      // Format process data from array
+      formattedMetrics = metricsData.map((process) => ({
+        processName: process.processName || 'Unknown Process',
+        cpu:
+          typeof process.cpu === 'number' ? Number(process.cpu.toFixed(1)) : 0,
+        memory: typeof process.memory === 'number' ? process.memory : 0,
+        memoryMB:
+          typeof process.memory === 'number'
+            ? Number((process.memory / (1024 * 1024)).toFixed(1))
+            : 0,
+      }));
+    } else if (typeof metricsData === 'object' && metricsData !== null) {
+      // Try to extract process information from object
+      const processes = metricsData.processes || [];
+      formattedMetrics = Array.isArray(processes)
+        ? processes.map((p) => ({
+            processName: p.name || p.processName || 'Unknown',
+            cpu: typeof p.cpu === 'number' ? Number(p.cpu.toFixed(1)) : 0,
+            memory: typeof p.memory === 'number' ? p.memory : 0,
+            memoryMB:
+              typeof p.memory === 'number'
+                ? Number((p.memory / (1024 * 1024)).toFixed(1))
+                : 0,
+          }))
+        : [];
+    }
+
+    // Filter out entries without a process name
+    formattedMetrics = formattedMetrics.filter((p) => p.processName);
+
+    // Sort by CPU usage (highest first)
+    // formattedMetrics.sort((a, b) => b.cpu - a.cpu);
+
+    // Limit to 15 processes to avoid overwhelming the UI
+    formattedMetrics = formattedMetrics.slice(0, 15);
+  } catch (err) {
+    console.error('Error formatting metrics:', err);
+    formattedMetrics = [];
+  }
+
+  return formattedMetrics;
+}
+
 io.on('connection', (socket) => {
-  console.log('User connected:', socket.id);
+  logWithPrefix('CONNECT', `User connected: ${socket.id}`);
 
   socket.on('create-room', () => {
     try {
-      // Generate a unique room ID
+      // Generate a unique room ID and session key
       const roomId = generateRoomId();
-      // Generate a unique session key
       const sessionKey = generateSessionKey();
 
-      console.log(
-        '[CREATE] Creating new room:',
-        roomId,
-        'with session key:',
-        sessionKey,
-        'for interviewer:',
-        socket.id
+      logWithPrefix(
+        'CREATE',
+        `Creating new room: ${roomId} with session key: ${sessionKey} for interviewer: ${socket.id}`
       );
 
       // Store roomId on socket object
       socket.roomId = roomId;
-      console.log(`[STORE] Added roomId ${roomId} to socket ${socket.id}`);
+      logWithPrefix('STORE', `Added roomId ${roomId} to socket ${socket.id}`);
 
       // Create room with initial state including session key
       activeRooms.set(roomId, {
         id: roomId,
-        sessionKey: sessionKey, // Store the session key with the room
+        sessionKey: sessionKey,
         interviewer: socket.id,
         interviewee: null,
         interviewerConnected: true,
@@ -124,32 +332,20 @@ io.on('connection', (socket) => {
         status: 'waiting',
         createdAt: new Date(),
         lastActive: new Date(),
+        messages: [],
       });
 
-      // Force leave any existing rooms to prevent issues
-      socket.rooms.forEach((room) => {
-        if (room !== socket.id) {
-          console.log(
-            `[LEAVE] Forcing interviewer ${socket.id} to leave room ${room}`
-          );
-          socket.leave(room);
-        }
-      });
-
-      // Join the new room
-      socket.join(roomId);
-      console.log(`[JOIN] Interviewer ${socket.id} joined room ${roomId}`);
+      // Ensure socket is in the room
+      ensureSocketInRoom(socket, roomId);
 
       // Debug room state
       debugRoom(roomId);
 
-      // Emit the room ID and session key back to the client - CRITICAL for URL update
+      // Emit the room ID and session key back to the client
       socket.emit('room-created', { roomId, sessionKey });
-      console.log(
-        `[EMIT] Sent room-created event with roomId: ${roomId} and sessionKey: ${sessionKey}`
-      );
+      logWithPrefix('EMIT', `Sent room-created event with roomId: ${roomId}`);
     } catch (error) {
-      console.error(`[ERROR] Failed to create room:`, error);
+      console.error('[ERROR] Failed to create room:', error);
       socket.emit('room-creation-failed', {
         message: 'Failed to create room due to server error',
       });
@@ -163,22 +359,14 @@ io.on('connection', (socket) => {
     socket.roomId = roomId;
     console.log(`[STORE] Added roomId ${roomId} to socket ${socket.id}`);
 
-    // Auto-create room if it doesn't exist
+    // Check if room exists
     let room = activeRooms.get(roomId);
     if (!room) {
-      console.log(`[AUTO-CREATE] Room ${roomId} not found, creating it`);
-      room = {
-        id: roomId,
-        interviewer: null, // Will be set when interviewer connects
-        interviewee: socket.id,
-        interviewerConnected: false,
-        intervieweeConnected: true,
-        code: '',
-        status: 'waiting',
-        createdAt: new Date(),
-        lastActive: new Date(),
-      };
-      activeRooms.set(roomId, room);
+      console.log(
+        `[ERROR] Room ${roomId} not found for interviewee join request`
+      );
+      socket.emit('room-not-found');
+      return;
     } else if (
       room.interviewee &&
       room.interviewee !== socket.id &&
@@ -227,128 +415,107 @@ io.on('connection', (socket) => {
 
   socket.on('join-session', ({ roomId, role }) => {
     try {
-      console.log('Joining session:', { roomId, role, socketId: socket.id });
+      logWithPrefix(
+        'SESSION',
+        `Joining session: roomId=${roomId}, role=${role}, socketId=${socket.id}`
+      );
 
       // Validate required parameters
       if (!roomId) {
-        console.log('[ERROR] Missing roomId in join-session request');
+        logWithPrefix('ERROR', 'Missing roomId in join-session request');
         socket.emit('error', { message: 'Room ID is required' });
         return;
       }
 
       // Store roomId on socket object for later use
       socket.roomId = roomId;
-      console.log(`[STORE] Added roomId ${roomId} to socket ${socket.id}`);
+      logWithPrefix('STORE', `Added roomId ${roomId} to socket ${socket.id}`);
 
-      // Auto-create room if needed
+      // Get room if it exists
       let room = activeRooms.get(roomId);
 
+      // If room doesn't exist, return room-not-found for both roles
       if (!room) {
-        console.log(`[AUTO-CREATE] Creating room ${roomId} for direct join`);
-        room = {
-          id: roomId,
-          interviewer: role === 'interviewer' ? socket.id : null,
-          interviewee: role === 'interviewee' ? socket.id : null,
-          interviewerConnected: role === 'interviewer',
-          intervieweeConnected: role === 'interviewee',
-          code: '',
-          status: role === 'interviewee' ? 'active' : 'waiting',
-          createdAt: new Date(),
-          lastActive: new Date(),
-        };
-        activeRooms.set(roomId, room);
-      } else {
-        // Cancel any pending deletion timer
-        if (pendingDeletions.has(roomId)) {
-          console.log(
-            `[RECONNECT] Cancelling pending deletion for room ${roomId}`
+        logWithPrefix(
+          'REJECT',
+          `Socket ${socket.id} tried to join non-existent room ${roomId}`
+        );
+        socket.emit('room-not-found');
+        return;
+      }
+
+      // Room exists, proceed with joining logic
+      // Cancel any pending deletion timer
+      handlePendingDeletion(roomId, true);
+
+      // Update room's last active timestamp
+      room.lastActive = new Date();
+
+      // Update role-specific information
+      if (role === 'interviewer') {
+        // Handle reconnection case
+        if (room.interviewer && room.interviewer !== socket.id) {
+          logWithPrefix(
+            'INTERVIEWER CHANGE',
+            `Updating interviewer from ${room.interviewer} to ${socket.id} in room ${roomId}`
           );
-          clearTimeout(pendingDeletions.get(roomId));
-          pendingDeletions.delete(roomId);
         }
 
-        // Update room's last active timestamp
-        room.lastActive = new Date();
+        // Update interviewer socket ID
+        room.interviewer = socket.id;
+        room.interviewerConnected = true;
+        activeRooms.set(roomId, room);
+        logWithPrefix(
+          'UPDATE',
+          `Set interviewer for room ${roomId} to ${socket.id}`
+        );
 
-        // Update role-specific information
-        if (role === 'interviewer') {
-          // Handle reconnection case - recognize if this is the same interviewer reconnecting
-          if (room.interviewer && room.interviewer !== socket.id) {
-            // Allow reconnection if this matches the stored interviewer ID (which would happen after page reload)
-            console.log(
-              `[INTERVIEWER CHANGE] Updating interviewer from ${room.interviewer} to ${socket.id} in room ${roomId}`
-            );
-          }
-
-          // Update interviewer socket ID
-          room.interviewer = socket.id;
-          room.interviewerConnected = true;
-          activeRooms.set(roomId, room);
-          console.log(
-            `[UPDATE] Set interviewer for room ${roomId} to ${socket.id}`
+        // Notify interviewee that interviewer has reconnected
+        if (room.interviewee) {
+          io.to(room.interviewee).emit('interviewer-reconnected');
+        }
+      } else if (role === 'interviewee') {
+        // Handle reconnection case for interviewee
+        if (room.interviewee && room.interviewee !== socket.id) {
+          logWithPrefix(
+            'INTERVIEWEE CHANGE',
+            `Updating interviewee from ${room.interviewee} to ${socket.id} in room ${roomId}`
           );
+        }
 
-          // Notify interviewee that interviewer has reconnected
-          if (room.interviewee) {
-            io.to(room.interviewee).emit('interviewer-reconnected');
-          }
-        } else if (role === 'interviewee') {
-          // Handle reconnection case for interviewee
-          if (room.interviewee && room.interviewee !== socket.id) {
-            console.log(
-              `[INTERVIEWEE CHANGE] Updating interviewee from ${room.interviewee} to ${socket.id} in room ${roomId}`
-            );
-          }
+        // Update interviewee socket ID
+        room.interviewee = socket.id;
+        room.intervieweeConnected = true;
+        room.status = 'active';
+        activeRooms.set(roomId, room);
+        logWithPrefix(
+          'UPDATE',
+          `Set interviewee for room ${roomId} to ${socket.id}`
+        );
 
-          // Update interviewee socket ID
-          room.interviewee = socket.id;
-          room.intervieweeConnected = true;
-          room.status = 'active';
-          activeRooms.set(roomId, room);
-          console.log(
-            `[UPDATE] Set interviewee for room ${roomId} to ${socket.id}`
-          );
-
-          // Notify the interviewer if present
-          if (room.interviewer) {
-            io.to(room.interviewer).emit('interviewee-joined', {
-              roomId,
-              intervieweeConnected: true,
-            });
-          }
+        // Notify the interviewer if present
+        if (room.interviewer) {
+          io.to(room.interviewer).emit('interviewee-joined', {
+            roomId,
+            intervieweeConnected: true,
+          });
         }
       }
 
-      // Force socket to leave any existing rooms
-      socket.rooms.forEach((existingRoom) => {
-        if (existingRoom !== socket.id && existingRoom !== roomId) {
-          console.log(
-            `[LEAVE] Forcing ${socket.id} to leave room ${existingRoom}`
-          );
-          socket.leave(existingRoom);
-        }
-      });
-
-      // Ensure the socket joins the room
-      socket.join(roomId);
-      console.log(`[JOIN] ${role} ${socket.id} joined room ${roomId}`);
+      // Ensure socket is in the proper room
+      ensureSocketInRoom(socket, roomId);
 
       // Debug room state
       debugRoom(roomId);
 
-      // Send any existing metrics immediately after joining
-      if (room.latestMetrics && role === 'interviewer') {
-        console.log(`[INITIAL METRICS] Sending to interviewer ${socket.id}`);
-        socket.emit('processUpdate', {
-          roomId,
-          data: room.latestMetrics,
-        });
-
-        // Also send via the interviewers broadcast channel for consistency
-        io.to(socket.id).emit('processUpdate-interviewers', {
-          roomId,
-          data: room.latestMetrics,
-        });
+      // Send any existing metrics immediately after joining (only to interviewer)
+      if (
+        room.latestMetrics &&
+        role === 'interviewer' &&
+        room.intervieweeConnected
+      ) {
+        logWithPrefix('INITIAL METRICS', `Sending to interviewer ${socket.id}`);
+        sendMetricsToInterviewer(roomId, room.latestMetrics);
       }
 
       // If this is the interviewer joining, notify the interviewee
@@ -360,16 +527,17 @@ io.on('connection', (socket) => {
       }
 
       socket.emit('session-joined', {
-        roomId,
+        roomId: room.id,
         code: room.code,
         status: room.status,
         hasInterviewee: !!room.interviewee,
         interviewerConnected: room.interviewerConnected,
         intervieweeConnected: room.intervieweeConnected,
-        sessionKey: role === 'interviewer' ? room.sessionKey : undefined,
+        ...(socket.id === room.interviewer && { sessionKey: room.sessionKey }),
+        messages: room.messages || [], // Include message history
       });
     } catch (error) {
-      console.error(`[ERROR] Failed to join session:`, error);
+      console.error('[ERROR] Failed to join session:', error);
       socket.emit('error', {
         message: 'Failed to join session due to server error',
       });
@@ -422,7 +590,7 @@ io.on('connection', (socket) => {
   });
 
   socket.on('disconnect', () => {
-    console.log('User disconnected:', socket.id);
+    logWithPrefix('DISCONNECT', `User disconnected: ${socket.id}`);
 
     // Find rooms where this socket was a participant
     for (const [roomId, room] of activeRooms.entries()) {
@@ -432,8 +600,9 @@ io.on('connection', (socket) => {
 
         // Check if this was the interviewer
         if (room.interviewer === socket.id) {
-          console.log(
-            `[DISCONNECT] Interviewer ${socket.id} disconnected from room ${roomId}`
+          logWithPrefix(
+            'DISCONNECT',
+            `Interviewer ${socket.id} disconnected from room ${roomId}`
           );
 
           // Mark the interviewer as disconnected but preserve their ID for reconnection
@@ -448,18 +617,29 @@ io.on('connection', (socket) => {
 
         // Check if this was the interviewee
         if (room.interviewee === socket.id) {
-          console.log(
-            `[DISCONNECT] Interviewee ${socket.id} disconnected from room ${roomId}`
+          logWithPrefix(
+            'DISCONNECT',
+            `Interviewee ${socket.id} disconnected from room ${roomId}`
           );
 
           // Mark the interviewee as disconnected but preserve their ID for reconnection
           room.intervieweeConnected = false;
 
-          // Notify others in the room
+          // Clear metrics and notify monitoring stopped
+          clearRoomMetrics(roomId);
+
+          // Notify others that interviewee left
           socket.to(roomId).emit('interviewee-left', {
             roomId,
             intervieweeConnected: false,
           });
+
+          // Explicitly notify interviewer that monitoring has stopped
+          notifyMonitoringStatus(
+            roomId,
+            false,
+            'Monitoring stopped: interviewee has left the session'
+          );
         }
 
         // Update the room state
@@ -467,26 +647,7 @@ io.on('connection', (socket) => {
 
         // If both participants are now disconnected, start a deletion timer
         if (!room.interviewerConnected && !room.intervieweeConnected) {
-          console.log(
-            `[PENDING] Room ${roomId} has no connected participants, starting 5-minute grace period`
-          );
-
-          // Cancel any existing timer
-          if (pendingDeletions.has(roomId)) {
-            clearTimeout(pendingDeletions.get(roomId));
-          }
-
-          // Set a 5-minute timer to delete the room if no one reconnects
-          const timer = setTimeout(() => {
-            console.log(
-              `[CLEANUP] Room ${roomId} grace period expired, deleting room`
-            );
-            activeRooms.delete(roomId);
-            pendingDeletions.delete(roomId);
-          }, 5 * 60 * 1000); // 5 minutes
-
-          // Store the timer so we can cancel it if someone reconnects
-          pendingDeletions.set(roomId, timer);
+          handlePendingDeletion(roomId);
         }
 
         debugRoom(roomId);
@@ -496,27 +657,53 @@ io.on('connection', (socket) => {
 
   // Handle chat messages
   socket.on('chat-message', (data) => {
-    const { roomId, message } = data;
-    if (activeRooms.has(roomId)) {
-      io.to(roomId).emit('chat-message', {
-        userId: socket.id,
-        message,
-        timestamp: new Date(),
-      });
+    const { roomId, message, sender, timestamp } = data;
+    if (!activeRooms.has(roomId)) {
+      console.log(`[CHAT] Room ${roomId} not found for chat message`);
+      return;
     }
+
+    const room = activeRooms.get(roomId);
+    const messageData = {
+      userId: socket.id,
+      message,
+      sender:
+        sender ||
+        (socket.id === room.interviewer ? 'interviewer' : 'interviewee'),
+      timestamp: timestamp || new Date(),
+    };
+
+    // Store the message in the room's message history
+    if (!room.messages) {
+      room.messages = [];
+    }
+    room.messages.push(messageData);
+
+    // Ensure we update the room in the activeRooms Map with the new messages
+    activeRooms.set(roomId, room);
+
+    // Update the room's last activity timestamp
+    room.lastActive = new Date();
+
+    // Broadcast the message to all users in the room
+    io.to(roomId).emit('chat-message', messageData);
+    console.log(
+      `[CHAT] Message sent to room ${roomId} from ${messageData.sender}`
+    );
   });
 
   // Handle metrics request
   socket.on('request-metrics', (data) => {
     try {
       const { roomId, role } = data;
-      console.log(
-        `[METRICS REQUEST] For room: ${roomId} from socket: ${socket.id}, role: ${role}`
+      logWithPrefix(
+        'METRICS REQUEST',
+        `For room: ${roomId} from socket: ${socket.id}, role: ${role}`
       );
 
       // Skip invalid room IDs
       if (!roomId || roomId.trim() === '') {
-        console.log(`[ERROR] Invalid roomId in metrics request: ${roomId}`);
+        logWithPrefix('ERROR', `Invalid roomId in metrics request: ${roomId}`);
         socket.emit('processUpdate', {
           roomId: roomId || 'invalid',
           data: { message: 'Invalid room ID provided' },
@@ -526,8 +713,9 @@ io.on('connection', (socket) => {
 
       // Skip if the request is from an interviewee
       if (role === 'interviewee') {
-        console.log(
-          `[SKIP] Ignoring metrics request from interviewee ${socket.id}`
+        logWithPrefix(
+          'SKIP',
+          `Ignoring metrics request from interviewee ${socket.id}`
         );
         socket.emit('processUpdate', {
           roomId,
@@ -538,16 +726,27 @@ io.on('connection', (socket) => {
         return;
       }
 
-      // Auto-create the room if it doesn't exist
-      const room = getOrCreateRoom(roomId, socket);
+      // Check if room exists
+      const room = activeRooms.get(roomId);
+
+      // If room doesn't exist, return an error
+      if (!room) {
+        logWithPrefix('ERROR', `Room ${roomId} not found for metrics request`);
+        socket.emit('processUpdate', {
+          roomId,
+          data: { message: 'Room not found. Please create a room first.' },
+        });
+        return;
+      }
 
       // Verify socket is authorized for this room and is an interviewer
       let isAuthorized = false;
       if (role === 'interviewer') {
         // Auto-update interviewer socket ID
         if (room.interviewer !== socket.id) {
-          console.log(
-            `[UPDATE] Updating interviewer socket from ${room.interviewer} to ${socket.id}`
+          logWithPrefix(
+            'UPDATE',
+            `Updating interviewer socket from ${room.interviewer} to ${socket.id}`
           );
           room.interviewer = socket.id;
           activeRooms.set(roomId, room);
@@ -555,87 +754,60 @@ io.on('connection', (socket) => {
         isAuthorized = true;
       }
 
-      console.log(
-        `[AUTH CHECK] Socket ${socket.id} as ${role} is ${
+      logWithPrefix(
+        'AUTH CHECK',
+        `Socket ${socket.id} as ${role} is ${
           isAuthorized ? 'authorized' : 'unauthorized'
         }`
       );
 
       // Make sure socket is in the room
-      if (!socket.rooms.has(roomId)) {
-        console.log(`[JOIN] Adding socket ${socket.id} to room ${roomId}`);
-        socket.join(roomId);
-      }
+      ensureSocketInRoom(socket, roomId);
 
       if (!isAuthorized) {
-        console.log(`[WARNING] Unauthorized metrics request from ${socket.id}`);
+        logWithPrefix(
+          'WARNING',
+          `Unauthorized metrics request from ${socket.id}`
+        );
         socket.emit('processUpdate', {
           roomId,
-          data: {
-            message: 'Unauthorized to request metrics for this room',
-          },
+          data: { message: 'Unauthorized to request metrics for this room' },
         });
         return;
       }
 
-      if (room.latestMetrics) {
-        // Format metrics data for consistency
-        let formattedMetrics = room.latestMetrics;
-
-        // Detailed logging of what we're sending
-        if (Array.isArray(formattedMetrics)) {
-          console.log(
-            `[METRICS DATA] Sending array with ${formattedMetrics.length} items`
-          );
-        } else if (typeof formattedMetrics === 'object') {
-          console.log(
-            `[METRICS DATA] Sending object with keys: ${Object.keys(
-              formattedMetrics
-            ).join(', ')}`
-          );
-        } else {
-          console.log(
-            `[METRICS DATA] Sending data of type: ${typeof formattedMetrics}`
-          );
-        }
-
-        // Send the cached metrics back to the interviewer only
-        console.log(
-          `[SENDING] Cached metrics for room: ${roomId} to interviewer`
+      // Check if interviewee is connected, if not, don't send metrics
+      if (!room.intervieweeConnected) {
+        logWithPrefix(
+          'METRICS',
+          `Interviewee not connected in room ${roomId}, sending empty metrics`
         );
+        socket.emit('processUpdate', {
+          roomId,
+          data: {
+            message:
+              'Interviewee is not connected. No monitoring data available.',
+          },
+        });
 
-        try {
-          // Direct socket reference
-          const requestingSocket = io.sockets.sockets.get(socket.id);
-          if (requestingSocket) {
-            requestingSocket.emit('processUpdate', {
-              roomId,
-              data: formattedMetrics,
-            });
-            console.log(
-              `[DIRECT EMIT] Sent metrics directly to interviewer socket ${socket.id}`
-            );
-          } else {
-            console.log(
-              `[FALLBACK] Socket object not found, using socket.emit`
-            );
-            socket.emit('processUpdate', { roomId, data: formattedMetrics });
-          }
+        // Clear any cached metrics
+        clearRoomMetrics(roomId);
 
-          // Last resort - broadcast to interviewers only channel
-          io.emit('processUpdate-interviewers', {
-            roomId,
-            data: formattedMetrics,
-          });
-        } catch (error) {
-          console.error(
-            `[ERROR] Failed to send metrics in request-metrics:`,
-            error
-          );
-        }
+        // Notify monitoring stopped
+        notifyMonitoringStatus(roomId, false, 'Interviewee is not connected');
+        return;
+      }
+
+      if (room.latestMetrics) {
+        // Send the cached metrics to the interviewer only
+        logWithPrefix(
+          'SENDING',
+          `Cached metrics for room: ${roomId} to interviewer`
+        );
+        sendMetricsToInterviewer(roomId, room.latestMetrics);
       } else {
         // Inform client that no metrics are available yet
-        console.log(`[INFO] No metrics available for room: ${roomId}`);
+        logWithPrefix('INFO', `No metrics available for room: ${roomId}`);
         socket.emit('processUpdate', {
           roomId,
           data: {
@@ -644,7 +816,7 @@ io.on('connection', (socket) => {
         });
       }
     } catch (error) {
-      console.error(`[ERROR] Failed to handle metrics request:`, error);
+      console.error('[ERROR] Failed to handle metrics request:', error);
       socket.emit('error', {
         message: 'Failed to handle metrics request due to server error',
       });
@@ -665,8 +837,9 @@ io.on('connection', (socket) => {
         // Store room ID on socket for future use
         if (socket.roomId !== roomId) {
           socket.roomId = roomId;
-          console.log(
-            `[UPDATE] Setting socket.roomId to ${roomId} from payload`
+          logWithPrefix(
+            'UPDATE',
+            `Setting socket.roomId to ${roomId} from payload`
           );
         }
       } else {
@@ -674,101 +847,45 @@ io.on('connection', (socket) => {
         metricsData = payload;
       }
 
-      console.log(
-        `Received metrics from ${socket.id} in room ${roomId}:`,
+      logWithPrefix(
+        'METRICS RECEIVED',
+        `From ${socket.id} in room ${roomId}:`,
         typeof metricsData
       );
 
       if (!roomId) {
-        console.error('Socket has no roomId when sending metrics');
+        logWithPrefix('ERROR', 'Socket has no roomId when sending metrics');
         return;
       }
 
       const room = activeRooms.get(roomId);
       if (!room) {
-        console.error(`Room ${roomId} not found for metrics update`);
+        logWithPrefix('ERROR', `Room ${roomId} not found for metrics update`);
         return;
       }
 
       // Format metrics data for better display
-      let formattedMetrics = [];
-
-      try {
-        if (Array.isArray(metricsData) && metricsData.length > 0) {
-          // Format process data from array
-          formattedMetrics = metricsData.map((process) => ({
-            processName: process.processName || 'Unknown Process',
-            cpu:
-              typeof process.cpu === 'number'
-                ? Number(process.cpu.toFixed(1))
-                : 0,
-            memory: typeof process.memory === 'number' ? process.memory : 0,
-            memoryMB:
-              typeof process.memory === 'number'
-                ? Number((process.memory / (1024 * 1024)).toFixed(1))
-                : 0,
-          }));
-        } else if (typeof metricsData === 'object' && metricsData !== null) {
-          // Try to extract process information from object
-          const processes = metricsData.processes || [];
-          formattedMetrics = Array.isArray(processes)
-            ? processes.map((p) => ({
-                processName: p.name || p.processName || 'Unknown',
-                cpu: typeof p.cpu === 'number' ? Number(p.cpu.toFixed(1)) : 0,
-                memory: typeof p.memory === 'number' ? p.memory : 0,
-                memoryMB:
-                  typeof p.memory === 'number'
-                    ? Number((p.memory / (1024 * 1024)).toFixed(1))
-                    : 0,
-              }))
-            : [];
-        }
-
-        // Filter out entries without a process name
-        formattedMetrics = formattedMetrics.filter((p) => p.processName);
-
-        // Sort by CPU usage (highest first)
-        // formattedMetrics.sort((a, b) => b.cpu - a.cpu);
-
-        // Limit to 15 processes to avoid overwhelming the UI
-        formattedMetrics = formattedMetrics.slice(0, 15);
-
-        console.log(
-          `Formatted ${formattedMetrics.length} processes for room ${roomId}`
-        );
-      } catch (err) {
-        console.error('Error formatting metrics:', err);
-        formattedMetrics = [];
-      }
+      const formattedMetrics = formatMetricsData(metricsData);
+      logWithPrefix(
+        'FORMATTED',
+        `${formattedMetrics.length} processes for room ${roomId}`
+      );
 
       // Store the formatted metrics
       room.latestMetrics = formattedMetrics;
+      activeRooms.set(roomId, room);
 
-      // Only send to interviewer sockets in the room
+      // Send metrics to interviewer
       if (room.interviewer) {
-        io.to(room.interviewer).emit('processUpdate-interviewers', {
-          roomId,
-          data: formattedMetrics,
-        });
-        console.log(`Sent metrics to interviewer ${room.interviewer}`);
+        sendMetricsToInterviewer(roomId, formattedMetrics);
       } else {
-        console.log('No interviewer available to receive metrics');
+        logWithPrefix('WARNING', 'No interviewer available to receive metrics');
       }
     } catch (err) {
       console.error('Error handling metrics:', err);
     }
   });
 });
-
-function generateRoomId() {
-  return Math.random().toString(36).substring(2, 8).toUpperCase();
-}
-
-// Generate a unique session key for interviewee authentication
-function generateSessionKey() {
-  // Generate a 6-digit numeric code that's easy to communicate verbally
-  return Math.floor(100000 + Math.random() * 900000).toString();
-}
 
 // Basic route
 app.get('/', (req, res) => {
@@ -857,11 +974,11 @@ app.post('/send_processes/:roomId', (req, res) => {
   const sessionKey = req.headers['x-session-key']; // Get session key from headers
   const data = req.body;
 
-  console.log(`[RECEIVED] Process data for room ${roomId}`);
+  logWithPrefix('RECEIVED', `Process data for room ${roomId}`);
 
   // Check if room exists
   if (!activeRooms.has(roomId)) {
-    console.log(`[ERROR] Invalid room ID: ${roomId}`);
+    logWithPrefix('ERROR', `Invalid room ID: ${roomId}`);
     return res.status(404).json({ message: 'Room not found' });
   }
 
@@ -870,7 +987,7 @@ app.post('/send_processes/:roomId', (req, res) => {
 
   // Validate the session key if present in room
   if (room.sessionKey && (!sessionKey || sessionKey !== room.sessionKey)) {
-    console.log(`[SECURITY] Invalid session key for room ${roomId}`);
+    logWithPrefix('SECURITY', `Invalid session key for room ${roomId}`);
     return res.status(403).json({
       message: 'Unauthorized: Invalid session key',
     });
@@ -878,7 +995,7 @@ app.post('/send_processes/:roomId', (req, res) => {
 
   // Log a sample of the data for debugging
   if (Array.isArray(data)) {
-    console.log(`[DATA SAMPLE] Received ${data.length} processes:`);
+    logWithPrefix('DATA SAMPLE', `Received ${data.length} processes:`);
     // Show first 3 processes or all if less than 3
     const sample = data.slice(0, 3);
     console.log(JSON.stringify(sample, null, 2));
@@ -886,111 +1003,33 @@ app.post('/send_processes/:roomId', (req, res) => {
       console.log(`... and ${data.length - 3} more processes`);
     }
   } else if (data && typeof data === 'object') {
-    console.log(
-      `[DATA] Received object with keys: ${Object.keys(data).join(', ')}`
+    logWithPrefix(
+      'DATA',
+      `Received object with keys: ${Object.keys(data).join(', ')}`
     );
   } else {
-    console.log(`[DATA] Received data of type: ${typeof data}`);
+    logWithPrefix('DATA', `Received data of type: ${typeof data}`);
   }
 
-  // Ensure data is properly formatted for the frontend
-  let formattedData = data;
-
-  // Check if the data is usable
-  if (!data || (typeof data === 'object' && Object.keys(data).length === 0)) {
-    console.log(`[WARNING] Received empty data for room ${roomId}`);
-    formattedData = { error: 'Received empty data' };
-  }
-
-  // Validate if data is an array
-  if (Array.isArray(data)) {
-    // Ensure each element in the array has processName for display
-    formattedData = data.map((process, index) => {
-      if (!process.processName) {
-        process.processName = `Process_${index}`;
-      }
-      return process;
-    });
-    console.log(
-      `[TRANSFORM] Formatted array data with ${formattedData.length} processes`
-    );
-  }
-
-  // Check if there is a room or not, if there is no room, return Error.
-  // This code is redundant now, as we already checked above
-  if (!activeRooms.has(roomId)) {
-    console.log(`[ERROR] Invalid room ID: ${roomId}`);
-    return res.status(404).json({ message: 'Room not found' });
-  }
+  // Format the metrics data
+  let formattedMetrics = formatMetricsData(data);
 
   // Store the latest metrics in the room
-  room.latestMetrics = formattedData;
+  room.latestMetrics = formattedMetrics;
   activeRooms.set(roomId, room);
 
   // Debug room members
-  const roomSockets = io.sockets.adapter.rooms.get(roomId);
-  console.log(
-    `[ROOM INFO] Room ${roomId} has members:`,
-    roomSockets ? [...roomSockets].length : 0,
-    'Interviewer:',
-    room.interviewer,
-    'Interviewee:',
-    room.interviewee
-  );
+  debugRoom(roomId);
 
-  // List all sockets in the room for debugging
-  if (roomSockets) {
-    console.log(`[SOCKET LIST] Sockets in room ${roomId}:`, [...roomSockets]);
+  // Send metrics to the interviewer only
+  if (room.interviewer) {
+    sendMetricsToInterviewer(roomId, formattedMetrics);
+    logWithPrefix('METRICS', `Sent to interviewer ${room.interviewer}`);
+  } else {
+    logWithPrefix('WARNING', `No interviewer assigned to room ${roomId}`);
   }
 
-  try {
-    // IMPORTANT: Only send metrics to the interviewer, not to the interviewee
-    // Do NOT use room broadcast since it would send to both
-
-    // Direct send to interviewer only
-    if (room.interviewer) {
-      const interviewerSocket = io.sockets.sockets.get(room.interviewer);
-      if (interviewerSocket) {
-        console.log(
-          `[SENDING] Metrics payload to interviewer with keys:`,
-          Array.isArray(formattedData)
-            ? `Array with ${formattedData.length} items`
-            : Object.keys(formattedData)
-        );
-        interviewerSocket.emit('processUpdate', {
-          roomId,
-          data: formattedData,
-        });
-        console.log(
-          `[DIRECT] Metrics sent to interviewer ${room.interviewer} (connected)`
-        );
-      } else {
-        console.log(
-          `[ERROR] Interviewer socket ${room.interviewer} not found or disconnected`
-        );
-        // Try broadcast to interviewer ID anyway as fallback
-        io.to(room.interviewer).emit('processUpdate', {
-          roomId,
-          data: formattedData,
-        });
-      }
-    } else {
-      console.log(`[WARNING] No interviewer assigned to room ${roomId}`);
-    }
-
-    // Skip sending to interviewee as per requirement
-    console.log(`[SKIP] Not sending metrics to interviewee as requested`);
-
-    // Last resort: broadcast only to interviewers using a special channel
-    io.emit('processUpdate-interviewers', { roomId, data: formattedData });
-    console.log(
-      `[BROADCAST-INTERVIEWERS] Metrics sent only to interviewers as last resort`
-    );
-  } catch (error) {
-    console.error(`[ERROR] Failed to send metrics:`, error);
-  }
-
-  res
+  return res
     .status(200)
     .json({ message: 'Data received and sent to interviewer only' });
 });
@@ -1005,50 +1044,6 @@ const PORT = process.env.PORT || 5001;
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
-
-// Find or create a room for a given roomId
-function getOrCreateRoom(roomId, socket) {
-  if (roomId && !activeRooms.has(roomId)) {
-    console.log(
-      `[CREATE] Creating missing room: ${roomId} for socket: ${socket.id}`
-    );
-    activeRooms.set(roomId, {
-      id: roomId,
-      interviewer: socket.id, // Assume requesting socket is interviewer
-      interviewee: null,
-      code: '',
-      status: 'waiting',
-      createdAt: new Date(),
-    });
-  }
-  return activeRooms.get(roomId);
-}
-
-// Clean up old rooms periodically
-function cleanupInactiveRooms() {
-  const now = new Date();
-  let count = 0;
-
-  for (const [roomId, room] of activeRooms.entries()) {
-    // If room is older than 24 hours, clean it up
-    if (room.createdAt && now - room.createdAt > 24 * 60 * 60 * 1000) {
-      // If there's a pending deletion timer, clear it
-      if (pendingDeletions.has(roomId)) {
-        clearTimeout(pendingDeletions.get(roomId));
-        pendingDeletions.delete(roomId);
-      }
-
-      activeRooms.delete(roomId);
-      count++;
-    }
-  }
-
-  if (count > 0) {
-    console.log(
-      `[CLEANUP] Removed ${count} inactive rooms. Active rooms: ${activeRooms.size}`
-    );
-  }
-}
 
 // Set up room cleanup interval
 const cleanupInterval = setInterval(cleanupInactiveRooms, 3600000); // Clean every hour
