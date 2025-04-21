@@ -1,0 +1,24 @@
+# Interviewee Instructions
+
+## Welcome to Your Interview Session
+
+This document contains important guidelines for your coding interview.
+
+### Getting Started
+1. You'll be working in the code editor provided on the screen.
+2. Your interviewer will provide you with coding problems to solve.
+3. Your code will be visible to the interviewer in real-time.
+
+### Best Practices
+- Think aloud as you work through the problem
+- Ask clarifying questions if something is unclear
+- Start with a simple solution, then optimize if time permits
+- Test your code with sample inputs
+
+### Technical Tips
+- Focus on correctness first, then efficiency
+- Comment your code appropriately
+- Handle edge cases
+- Consider time and space complexity
+
+Good luck with your interview! 
