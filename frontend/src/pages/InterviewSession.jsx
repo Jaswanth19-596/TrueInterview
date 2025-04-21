@@ -33,7 +33,7 @@ import RefreshIcon from '@mui/icons-material/Refresh';
 import MemoryIcon from '@mui/icons-material/Memory';
 import CodeIcon from '@mui/icons-material/Code';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
-import { downloadFileWithReplacements } from '../utils/fileUtils';
+import { downloadFile } from '../utils/fileUtils';
 
 const SOCKET_URL = 'http://localhost:5001';
 const INSTRUCTIONS_PATH = '/assets/main.py';
@@ -46,6 +46,7 @@ const InterviewSession = () => {
   const [isConnected, setIsConnected] = useState(false);
   const [role, setRole] = useState('');
   const [roomId, setRoomId] = useState('');
+  const [sessionKey, setSessionKey] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [showInstructionsDialog, setShowInstructionsDialog] = useState(false);
@@ -144,8 +145,12 @@ const InterviewSession = () => {
         return;
       }
 
-      // Update state with the new room ID
+      // Update state with the new room ID and session key
       setRoomId(data.roomId);
+      if (data.sessionKey) {
+        setSessionKey(data.sessionKey);
+        console.log('Session key received:', data.sessionKey);
+      }
 
       // Update the URL to include the server-generated room ID
       const newUrl = `/session?roomId=${data.roomId}&role=${roleParam}`;
@@ -179,6 +184,12 @@ const InterviewSession = () => {
       }
       if (data.intervieweeConnected !== undefined) {
         setIntervieweeConnected(data.intervieweeConnected);
+      }
+
+      // Capture session key if present (should only be sent to interviewer)
+      if (data.sessionKey) {
+        console.log('Session key received from session join:', data.sessionKey);
+        setSessionKey(data.sessionKey);
       }
 
       if (data.code) {
@@ -535,17 +546,8 @@ const InterviewSession = () => {
 
   const handleDownloadInstructions = async () => {
     try {
-      // Define the replacements for the Python file
-      const replacements = {
-        'student_id = "student123"': `student_id = "${roomId}"`,
-      };
-
-      // Download and customize the file
-      const success = await downloadFileWithReplacements(
-        INSTRUCTIONS_PATH,
-        'main.py',
-        replacements
-      );
+      // Download the file without any replacements
+      const success = await downloadFile(INSTRUCTIONS_PATH, 'main.py');
 
       if (!success) {
         setError('Failed to download instructions. Please try again.');
@@ -1182,6 +1184,39 @@ const InterviewSession = () => {
                         </Typography>
                       </Typography>
                     </Box>
+
+                    {/* Display Session Key for interviewer only */}
+                    {role === 'interviewer' && sessionKey && (
+                      <Box sx={{ mb: 2 }}>
+                        <Typography
+                          variant="body2"
+                          component="div"
+                          color="text.secondary"
+                          sx={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            mb: 1,
+                          }}
+                        >
+                          <span>Session Key:</span>
+                          <Typography
+                            component="span"
+                            variant="body1"
+                            fontWeight={500}
+                            color="primary"
+                          >
+                            {sessionKey}
+                          </Typography>
+                        </Typography>
+                        <Typography
+                          variant="caption"
+                          color="text.secondary"
+                          sx={{ display: 'block', textAlign: 'right' }}
+                        >
+                          Give this key to the interviewee
+                        </Typography>
+                      </Box>
+                    )}
 
                     <Box sx={{ mb: 2 }}>
                       <Typography

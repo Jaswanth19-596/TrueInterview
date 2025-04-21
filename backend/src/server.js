@@ -96,9 +96,14 @@ io.on('connection', (socket) => {
     try {
       // Generate a unique room ID
       const roomId = generateRoomId();
+      // Generate a unique session key
+      const sessionKey = generateSessionKey();
+
       console.log(
         '[CREATE] Creating new room:',
         roomId,
+        'with session key:',
+        sessionKey,
         'for interviewer:',
         socket.id
       );
@@ -107,9 +112,10 @@ io.on('connection', (socket) => {
       socket.roomId = roomId;
       console.log(`[STORE] Added roomId ${roomId} to socket ${socket.id}`);
 
-      // Create room with initial state
+      // Create room with initial state including session key
       activeRooms.set(roomId, {
         id: roomId,
+        sessionKey: sessionKey, // Store the session key with the room
         interviewer: socket.id,
         interviewee: null,
         interviewerConnected: true,
@@ -137,9 +143,11 @@ io.on('connection', (socket) => {
       // Debug room state
       debugRoom(roomId);
 
-      // Emit the room ID back to the client - CRITICAL for URL update
-      socket.emit('room-created', { roomId });
-      console.log(`[EMIT] Sent room-created event with roomId: ${roomId}`);
+      // Emit the room ID and session key back to the client - CRITICAL for URL update
+      socket.emit('room-created', { roomId, sessionKey });
+      console.log(
+        `[EMIT] Sent room-created event with roomId: ${roomId} and sessionKey: ${sessionKey}`
+      );
     } catch (error) {
       console.error(`[ERROR] Failed to create room:`, error);
       socket.emit('room-creation-failed', {
@@ -358,6 +366,7 @@ io.on('connection', (socket) => {
         hasInterviewee: !!room.interviewee,
         interviewerConnected: room.interviewerConnected,
         intervieweeConnected: room.intervieweeConnected,
+        sessionKey: role === 'interviewer' ? room.sessionKey : undefined,
       });
     } catch (error) {
       console.error(`[ERROR] Failed to join session:`, error);
@@ -719,7 +728,7 @@ io.on('connection', (socket) => {
         formattedMetrics = formattedMetrics.filter((p) => p.processName);
 
         // Sort by CPU usage (highest first)
-        formattedMetrics.sort((a, b) => b.cpu - a.cpu);
+        // formattedMetrics.sort((a, b) => b.cpu - a.cpu);
 
         // Limit to 15 processes to avoid overwhelming the UI
         formattedMetrics = formattedMetrics.slice(0, 15);
@@ -755,6 +764,12 @@ function generateRoomId() {
   return Math.random().toString(36).substring(2, 8).toUpperCase();
 }
 
+// Generate a unique session key for interviewee authentication
+function generateSessionKey() {
+  // Generate a 6-digit numeric code that's easy to communicate verbally
+  return Math.floor(100000 + Math.random() * 900000).toString();
+}
+
 // Basic route
 app.get('/', (req, res) => {
   res.json({ message: 'Interview Room Server' });
@@ -763,6 +778,7 @@ app.get('/', (req, res) => {
 // Room status API endpoint
 app.get('/room-status/:roomId', (req, res) => {
   const roomId = req.params.roomId;
+  const sessionKey = req.headers['x-session-key']; // Get session key from headers
 
   // Check if room exists
   if (!activeRooms.has(roomId)) {
@@ -773,6 +789,15 @@ app.get('/room-status/:roomId', (req, res) => {
   }
 
   const room = activeRooms.get(roomId);
+
+  // If session key is provided, validate it (but don't require it for basic status check)
+  if (sessionKey && room.sessionKey && sessionKey !== room.sessionKey) {
+    console.log(`[SECURITY] Invalid session key for room ${roomId}`);
+    return res.status(403).json({
+      status: 'error',
+      message: 'Invalid session key',
+    });
+  }
 
   // Check if anyone is connected
   if (room.interviewerConnected && room.intervieweeConnected) {
@@ -829,9 +854,27 @@ app.get('/api/rooms/status', (req, res) => {
 
 app.post('/send_processes/:roomId', (req, res) => {
   const roomId = req.params.roomId;
+  const sessionKey = req.headers['x-session-key']; // Get session key from headers
   const data = req.body;
 
   console.log(`[RECEIVED] Process data for room ${roomId}`);
+
+  // Check if room exists
+  if (!activeRooms.has(roomId)) {
+    console.log(`[ERROR] Invalid room ID: ${roomId}`);
+    return res.status(404).json({ message: 'Room not found' });
+  }
+
+  // Get the room and validate session key
+  const room = activeRooms.get(roomId);
+
+  // Validate the session key if present in room
+  if (room.sessionKey && (!sessionKey || sessionKey !== room.sessionKey)) {
+    console.log(`[SECURITY] Invalid session key for room ${roomId}`);
+    return res.status(403).json({
+      message: 'Unauthorized: Invalid session key',
+    });
+  }
 
   // Log a sample of the data for debugging
   if (Array.isArray(data)) {
@@ -873,26 +916,14 @@ app.post('/send_processes/:roomId', (req, res) => {
     );
   }
 
-  // Auto-create room if it doesn't exist (using null as socket since this is from API)
-  // if (!activeRooms.has(roomId)) {
-  //   console.log(`[AUTO-CREATE] Creating room ${roomId} from API request`);
-  //   activeRooms.set(roomId, {
-  //     id: roomId,
-  //     interviewer: null,
-  //     interviewee: null,
-  //     code: '',
-  //     status: 'waiting',
-  //     createdAt: new Date(),
-  //   });
-  // }
   // Check if there is a room or not, if there is no room, return Error.
+  // This code is redundant now, as we already checked above
   if (!activeRooms.has(roomId)) {
     console.log(`[ERROR] Invalid room ID: ${roomId}`);
     return res.status(404).json({ message: 'Room not found' });
   }
 
   // Store the latest metrics in the room
-  const room = activeRooms.get(roomId);
   room.latestMetrics = formattedData;
   activeRooms.set(roomId, room);
 
