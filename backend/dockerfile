@@ -1,0 +1,14 @@
+FROM node:latest
+WORKDIR /backend
+COPY package*.json ./
+RUN npm ci 
+COPY . . 
+RUN chown -R node:node /backend
+USER node
+EXPOSE 5001
+ENV NODE_ENV=stagging
+CMD ["npm" , "start"]
+
+
+
+
