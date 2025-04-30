@@ -1,25 +1,13 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import {
-  Container,
-  Box,
-  Typography,
-  TextField,
-  Button,
-  Paper,
-  Grid,
-  Divider,
-} from '@mui/material';
-import AddIcon from '@mui/icons-material/Add';
-import LoginIcon from '@mui/icons-material/Login';
+import '../styles/InterviewPages.css';
+import { AddCircle } from '@mui/icons-material';
 
 const InterviewerLanding = () => {
   const navigate = useNavigate();
   const [roomId, setRoomId] = useState('');
 
   const handleCreateRoom = () => {
-    // Navigate to session without a room ID - let the server generate one
-    console.log('Creating new room, navigating to session page');
     navigate(`/session?role=interviewer`);
   };
 
@@ -30,72 +18,44 @@ const InterviewerLanding = () => {
   };
 
   return (
-    <Container component="main" maxWidth="sm">
-      <Box
-        sx={{
-          marginTop: 8,
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-        }}
-      >
-        <Paper elevation={3} sx={{ p: 4, width: '100%' }}>
-          <Typography component="h1" variant="h4" align="center" gutterBottom>
-            Interview Room
-          </Typography>
-          <Typography
-            variant="body1"
-            align="center"
-            color="text.secondary"
-            sx={{ mb: 4 }}
+    <div className="interview-page">
+      <div className="interview-container">
+        <div className="interview-card">
+          <div className="interview-header">
+            <h1 className="interview-title">Interview Room</h1>
+            <p className="interview-subtitle">Create a new room or join an existing one</p>
+          </div>
+
+          <button
+            className="btn btn-primary"
+            onClick={handleCreateRoom}
           >
-            Create a new room or join an existing one
-          </Typography>
+            <AddCircle style={{ marginRight: '8px' }} />
+            Create New Room
+          </button>
 
-          <Grid container spacing={3}>
-            <Grid item xs={12}>
-              <Button
-                fullWidth
-                variant="contained"
-                size="large"
-                startIcon={<AddIcon />}
-                onClick={handleCreateRoom}
-                sx={{ py: 2 }}
-              >
-                Create New Room
-              </Button>
-            </Grid>
+          <div className="divider">OR</div>
 
-            <Grid item xs={12}>
-              <Divider>OR</Divider>
-            </Grid>
-
-            <Grid item xs={12}>
-              <Typography variant="h6" gutterBottom>
-                Join Existing Room
-              </Typography>
-              <Box sx={{ display: 'flex', gap: 1 }}>
-                <TextField
-                  fullWidth
-                  label="Room ID"
-                  value={roomId}
-                  onChange={(e) => setRoomId(e.target.value)}
-                  placeholder="Enter room ID"
-                />
-                <Button
-                  variant="contained"
-                  startIcon={<LoginIcon />}
-                  onClick={handleJoinRoom}
-                  disabled={!roomId.trim()}
-                >
-                  Join
-                </Button>
-              </Box>
-            </Grid>
-          </Grid>
-        </Paper>
-      </Box>
-    </Container>
+          <div className="form-group">
+            <h3>Join Existing Room</h3>
+            <input
+              type="text"
+              className="input-field"
+              placeholder="Enter Room ID"
+              value={roomId}
+              onChange={(e) => setRoomId(e.target.value)}
+            />
+            <button
+              className="btn btn-secondary"
+              onClick={handleJoinRoom}
+              disabled={!roomId.trim()}
+            >
+              Join Room
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 };
 
