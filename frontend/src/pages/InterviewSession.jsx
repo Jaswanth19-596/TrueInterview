@@ -40,14 +40,36 @@ import Brightness4Icon from '@mui/icons-material/Brightness4';
 import Brightness7Icon from '@mui/icons-material/Brightness7';
 import SendIcon from '@mui/icons-material/Send';
 import ChatIcon from '@mui/icons-material/Chat';
+import SecurityIcon from '@mui/icons-material/Security';
+import ShieldIcon from '@mui/icons-material/Shield';
+import MonitorIcon from '@mui/icons-material/Monitor';
 import { downloadFile, getOsSpecificScriptPath } from '../utils/fileUtils';
 import { useTheme } from '../context/ThemeContext';
 import { format } from 'date-fns';
 import RadioIcon from '@mui/icons-material/Radio';
 import SignalWifiOffIcon from '@mui/icons-material/SignalWifiOff';
 import Editor from '@monaco-editor/react';
+import shieldIcon from '../assets/shield.png';
 
-const SOCKET_URL = 'http://localhost:5001';
+// Environment Variables
+const ENV = {
+  SOCKET_URL: import.meta.env.VITE_SOCKET_URL || 'http://localhost:5001',
+  APP_NAME: import.meta.env.VITE_APP_NAME || 'True Interview',
+  METRICS_REFRESH_INTERVAL:
+    Number(import.meta.env.VITE_METRICS_REFRESH_INTERVAL) || 15000,
+  MONITORED_APPS: (
+    import.meta.env.VITE_MONITORED_APPS || 'interview coder,cluely'
+  ).split(','),
+  DEFAULT_THEME: import.meta.env.VITE_DEFAULT_THEME || 'light',
+  CODE_EDITOR_FONT: import.meta.env.VITE_CODE_EDITOR_FONT || 'Fira Code',
+  ENABLE_CHAT: import.meta.env.VITE_ENABLE_CHAT !== 'false',
+  ENABLE_MONITORING: import.meta.env.VITE_ENABLE_MONITORING !== 'false',
+  ENABLE_CODE_EDITOR: import.meta.env.VITE_ENABLE_CODE_EDITOR !== 'false',
+};
+
+// Replace SOCKET_URL constant with environment variable
+const SOCKET_URL = ENV.SOCKET_URL;
+
 // Default instructions path as an object with path and filename
 const INSTRUCTIONS_PATH = {
   path: '/assets/main_mac.py',
@@ -373,7 +395,7 @@ const InterviewSession = () => {
       newSocket.emit('join-session', { roomId: data.roomId, role: roleParam });
     });
 
-    newSocket.on('start-session', (data) => {
+    newSocket.on('start-session', () => {
       // Join the session after room is joined
       newSocket.emit('join-session', { roomId: roomIdParam, role: roleParam });
     });
@@ -426,9 +448,8 @@ const InterviewSession = () => {
       setInterviewerConnected(false);
     });
 
-    newSocket.on('interviewee-joined', (data) => {
+    newSocket.on('interviewee-joined', () => {
       setError('');
-
       setIntervieweeConnected(true);
     });
 
@@ -478,7 +499,7 @@ const InterviewSession = () => {
       setTimeout(() => navigate('/'), 2000);
     });
 
-    newSocket.on('room-ended', ({ reason }) => {
+    newSocket.on('room-ended', () => {
       setError('The interview session has ended.');
       // Clear localStorage
       localStorage.removeItem(`code-${roomIdParam}`);
@@ -609,25 +630,20 @@ const InterviewSession = () => {
 
     setSocket(newSocket);
 
-    // Add periodic metrics refresh for interviewer only
+    // Use environment variables for metrics refresh interval
     let metricsRefreshInterval = null;
     if (roleParam === 'interviewer') {
       metricsRefreshInterval = setInterval(() => {
         if (newSocket && newSocket.connected) {
-          // Get the most current roomId from state, not closure variable
           const currentRoomId = roomIdParam;
-
-          // Only request if we have a valid room ID
           if (currentRoomId && currentRoomId.trim() !== '') {
             newSocket.emit('request-metrics', {
               roomId: currentRoomId,
               role: roleParam,
             });
-          } else {
-            console.log('Auto-refresh skipped - no valid room ID');
           }
         }
-      }, 15000); // Refresh every 15 seconds
+      }, ENV.METRICS_REFRESH_INTERVAL);
     }
 
     return () => {
@@ -1061,7 +1077,7 @@ const InterviewSession = () => {
         overflow: 'auto',
       }}
     >
-      {/* Loading State */}
+      {/* Loading State with True Interview branding */}
       {isLoading && (
         <Box
           sx={{
@@ -1073,6 +1089,26 @@ const InterviewSession = () => {
             gap: 2,
           }}
         >
+          <Box
+            sx={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 2,
+              mb: 2,
+            }}
+          >
+            <Box
+              component="img"
+              src={shieldIcon}
+              sx={{
+                width: 40,
+                height: 40,
+              }}
+            />
+            <Typography variant="h4" fontWeight="600" color="primary">
+              {ENV.APP_NAME}
+            </Typography>
+          </Box>
           <Typography variant="h5" gutterBottom fontWeight="500">
             {!roomId ? 'Creating new room...' : `Joining room ${roomId}...`}
           </Typography>
@@ -1175,22 +1211,29 @@ const InterviewSession = () => {
                     : 'rgba(0, 0, 0, 0.08)',
                 }}
               >
-                <Typography
-                  variant="h5"
-                  fontWeight={600}
-                  sx={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 1,
-                    color: isDarkMode ? '#E2E8F0' : '#333',
-                    fontSize: { xs: '1.2rem', sm: '1.5rem' },
-                  }}
-                >
-                  <span style={{ color: isDarkMode ? '#38BDF8' : '#3f51b5' }}>
-                    &#60; &#62;
-                  </span>{' '}
-                  Code Editor
-                </Typography>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                  <Box
+                    component="img"
+                    src={shieldIcon}
+                    sx={{
+                      width: 24,
+                      height: 24,
+                    }}
+                  />
+                  <Typography
+                    variant="h5"
+                    fontWeight={600}
+                    sx={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 1,
+                      color: isDarkMode ? '#E2E8F0' : '#333',
+                      fontSize: { xs: '1.2rem', sm: '1.5rem' },
+                    }}
+                  >
+                    {ENV.APP_NAME}
+                  </Typography>
+                </Box>
 
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
                   {/* Theme Toggle Button */}
@@ -1341,6 +1384,13 @@ const InterviewSession = () => {
                       ? 'rgba(255, 255, 255, 0.08)'
                       : 'rgba(0, 0, 0, 0.08)',
                     boxShadow: 'none',
+                    transition: 'all 0.3s ease',
+                    '&:hover': {
+                      transform: 'translateY(-2px)',
+                      boxShadow: isDarkMode
+                        ? '0 8px 16px rgba(0,0,0,0.4)'
+                        : '0 8px 16px rgba(0,0,0,0.1)',
+                    },
                   }}
                 >
                   <CardContent sx={{ p: { xs: 2, sm: 3 } }}>
@@ -1605,7 +1655,7 @@ const InterviewSession = () => {
                 </Card>
               </Box>
 
-              {/* Download Instructions Button */}
+              {/* Download Instructions Button with improved styling */}
               {role === 'interviewee' && (
                 <Box sx={{ px: { xs: 2, sm: 3 }, mt: 3 }}>
                   <Button
@@ -1618,9 +1668,14 @@ const InterviewSession = () => {
                       borderRadius: 3,
                       borderColor: 'rgba(63, 81, 181, 0.5)',
                       color: '#3f51b5',
+                      transition: 'all 0.3s ease',
                       '&:hover': {
                         borderColor: '#3f51b5',
                         backgroundColor: 'rgba(63, 81, 181, 0.04)',
+                        transform: 'translateY(-2px)',
+                        boxShadow: isDarkMode
+                          ? '0 4px 12px rgba(63, 81, 181, 0.3)'
+                          : '0 4px 12px rgba(63, 81, 181, 0.2)',
                       },
                     }}
                   >
@@ -1703,12 +1758,12 @@ const InterviewSession = () => {
                       height: '100%',
                     }}
                   >
-                    {renderChatBox()}
+                    {ENV.ENABLE_CHAT && renderChatBox()}
                   </CardContent>
                 </Card>
 
                 {/* True Interview Detection Status - Only show for interviewer */}
-                {role === 'interviewer' && (
+                {role === 'interviewer' && ENV.ENABLE_MONITORING && (
                   <Box
                     sx={{
                       mt: 2,
@@ -1720,11 +1775,11 @@ const InterviewSession = () => {
                     }}
                   >
                     <Chip
-                      icon={<CheckCircleIcon />}
+                      icon={<SecurityIcon />}
                       label={
                         foundInterviewCoder
-                          ? 'Interview Coder Detected'
-                          : 'Interview Coder Not Detected'
+                          ? `${ENV.MONITORED_APPS[0]} Running`
+                          : `No ${ENV.MONITORED_APPS[0]} Detected`
                       }
                       color={foundInterviewCoder ? 'error' : 'success'}
                       variant={foundInterviewCoder ? 'filled' : 'outlined'}
@@ -1740,11 +1795,12 @@ const InterviewSession = () => {
                       }}
                     />
 
-                    {/* Cluely Detection Status */}
                     <Chip
-                      icon={<CheckCircleIcon />}
+                      icon={<SecurityIcon />}
                       label={
-                        foundCluely ? 'Cluely Detected' : 'Cluely Not Detected'
+                        foundCluely
+                          ? `${ENV.MONITORED_APPS[1]} Running`
+                          : `No ${ENV.MONITORED_APPS[1]} Detected`
                       }
                       color={foundCluely ? 'error' : 'success'}
                       variant={foundCluely ? 'filled' : 'outlined'}
@@ -1760,10 +1816,29 @@ const InterviewSession = () => {
                       }}
                     />
 
-                    {/* Monitoring Status */}
+                    {/* Monitoring Status with animated icon */}
                     <Chip
                       icon={
-                        isMonitoring ? <RadioIcon /> : <SignalWifiOffIcon />
+                        isMonitoring ? (
+                          <MonitorIcon
+                            sx={{
+                              animation: 'monitor-pulse 1.5s infinite',
+                              '@keyframes monitor-pulse': {
+                                '0%': {
+                                  opacity: 1,
+                                },
+                                '50%': {
+                                  opacity: 0.5,
+                                },
+                                '100%': {
+                                  opacity: 1,
+                                },
+                              },
+                            }}
+                          />
+                        ) : (
+                          <SignalWifiOffIcon />
+                        )
                       }
                       label={
                         isMonitoring
@@ -1780,6 +1855,11 @@ const InterviewSession = () => {
                         width: '100%',
                         '& .MuiChip-icon': {
                           color: 'inherit',
+                        },
+                        transition: 'all 0.3s ease',
+                        '&:hover': {
+                          transform: 'translateY(-2px)',
+                          boxShadow: 2,
                         },
                       }}
                     />
