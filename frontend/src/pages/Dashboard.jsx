@@ -40,17 +40,14 @@ const Dashboard = () => {
 
   const handleCreateInterview = () => {
     // TODO: Implement interview creation
-    console.log('Create new interview');
   };
 
   const handleEditInterview = (id) => {
     // TODO: Implement interview editing
-    console.log('Edit interview:', id);
   };
 
   const handleDeleteInterview = (id) => {
     // TODO: Implement interview deletion
-    console.log('Delete interview:', id);
   };
 
   const handleJoinInterview = (id) => {

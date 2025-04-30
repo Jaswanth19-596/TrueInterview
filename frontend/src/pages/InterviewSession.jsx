@@ -40,7 +40,7 @@ import Brightness4Icon from '@mui/icons-material/Brightness4';
 import Brightness7Icon from '@mui/icons-material/Brightness7';
 import SendIcon from '@mui/icons-material/Send';
 import ChatIcon from '@mui/icons-material/Chat';
-import { downloadFile } from '../utils/fileUtils';
+import { downloadFile, getOsSpecificScriptPath } from '../utils/fileUtils';
 import { useTheme } from '../context/ThemeContext';
 import { format } from 'date-fns';
 import RadioIcon from '@mui/icons-material/Radio';
@@ -48,7 +48,12 @@ import SignalWifiOffIcon from '@mui/icons-material/SignalWifiOff';
 import Editor from '@monaco-editor/react';
 
 const SOCKET_URL = 'http://localhost:5001';
-const INSTRUCTIONS_PATH = '/assets/main.py';
+// Default instructions path as an object with path and filename
+const INSTRUCTIONS_PATH = {
+  path: '/assets/main_mac.py',
+  filename: 'main.py',
+  isBinary: false,
+};
 
 // Custom code editor component with line numbers
 const CodeEditorWithLineNumbers = ({ value, onChange, isDarkMode }) => {
@@ -239,6 +244,7 @@ const InterviewSession = () => {
   const [isMonitoring, setIsMonitoring] = useState(false);
   const [messages, setMessages] = useState([]);
   const [currentMessage, setCurrentMessage] = useState('');
+  const [intervieweeOs, setIntervieweeOs] = useState('');
   const chatEndRef = useRef(null);
 
   useEffect(() => {
@@ -252,14 +258,12 @@ const InterviewSession = () => {
 
     // We must have a role at minimum
     if (!roleParam) {
-      console.log('No role specified, redirecting to home');
       navigate('/');
       return;
     }
 
     // For interviewees, we must have a room ID
     if (roleParam === 'interviewee' && !roomIdParam) {
-      console.log('Interviewee must specify a room ID');
       setError('You must specify a room ID to join as an interviewee');
       setTimeout(() => navigate('/'), 2000);
       return;
@@ -267,7 +271,6 @@ const InterviewSession = () => {
 
     // For interviewers with a room ID, they should be joining an existing room, not creating one
     if (roleParam === 'interviewer' && roomIdParam) {
-      console.log('Interviewer joining existing room:', roomIdParam);
       // Will join the existing room or receive room-not-found if it doesn't exist
     }
 
@@ -305,45 +308,47 @@ const InterviewSession = () => {
     });
 
     newSocket.on('connect', () => {
-      console.log('Connected to server with socket ID:', newSocket.id);
       setIsConnected(true);
       setError('');
+
+      // Get OS information
+      const clientOs = (() => {
+        const userAgent = window.navigator.userAgent.toLowerCase();
+        if (userAgent.indexOf('win') !== -1) return 'win32';
+        if (userAgent.indexOf('mac') !== -1) return 'darwin';
+        if (userAgent.indexOf('linux') !== -1) return 'linux';
+        return 'unknown';
+      })();
 
       // Initialize the room based on role
       if (roleParam === 'interviewer') {
         // For interviewer: if we have a URL room ID, try to join it directly
         if (roomIdParam) {
-          console.log(
-            `Attempting to join existing room as interviewer: ${roomIdParam}`
-          );
           // Use join-session to attempt to join the existing room
           newSocket.emit('join-session', {
             roomId: roomIdParam,
             role: roleParam,
+            os: clientOs,
           });
         } else {
           // Only create a new room if no room ID is specified - this is the only path
           // where room creation should happen
-          console.log('Creating new room as no room ID was provided');
           newSocket.emit('create-room');
         }
       } else if (roomIdParam) {
         // For interviewee: always join the specified room
-        console.log(`Joining room ${roomIdParam} as interviewee`);
         newSocket.emit('join-session', {
           roomId: roomIdParam,
           role: roleParam,
+          os: clientOs,
         });
       } else {
-        console.log('Interviewee must specify a room ID');
         setError('You must specify a room ID to join as an interviewee');
         setTimeout(() => navigate('/'), 2000);
       }
     });
 
     newSocket.on('room-created', (data) => {
-      console.log('Room created event received:', data);
-
       if (!data || !data.roomId) {
         console.error('Invalid room-created event - missing roomId');
         return;
@@ -353,12 +358,10 @@ const InterviewSession = () => {
       setRoomId(data.roomId);
       if (data.sessionKey) {
         setSessionKey(data.sessionKey);
-        console.log('Session key received:', data.sessionKey);
       }
 
       // Update the URL to include the server-generated room ID
       const newUrl = `/session?roomId=${data.roomId}&role=${roleParam}`;
-      console.log(`Updating URL to: ${newUrl}`);
 
       try {
         window.history.replaceState(null, '', newUrl);
@@ -367,18 +370,15 @@ const InterviewSession = () => {
       }
 
       // Join the session with the new room ID
-      console.log(`Joining session with newly created room ID: ${data.roomId}`);
       newSocket.emit('join-session', { roomId: data.roomId, role: roleParam });
     });
 
     newSocket.on('start-session', (data) => {
-      console.log('Session started:', data);
       // Join the session after room is joined
       newSocket.emit('join-session', { roomId: roomIdParam, role: roleParam });
     });
 
     newSocket.on('session-joined', (data) => {
-      console.log('Session joined:', data);
       // Hide loading state since we're now in a session
       setIsLoading(false);
 
@@ -392,7 +392,6 @@ const InterviewSession = () => {
 
       // Capture session key if present (should only be sent to interviewer)
       if (data.sessionKey) {
-        console.log('Session key received from session join:', data.sessionKey);
         setSessionKey(data.sessionKey);
       }
 
@@ -404,7 +403,6 @@ const InterviewSession = () => {
 
       // Load chat history if available
       if (data.messages && Array.isArray(data.messages)) {
-        console.log('Received chat history:', data.messages);
         setMessages(
           data.messages.map((msg) => ({
             ...msg,
@@ -413,26 +411,28 @@ const InterviewSession = () => {
           }))
         );
       }
+
+      // Store OS information
+      if (data.intervieweeOs) {
+        setIntervieweeOs(data.intervieweeOs);
+      }
     });
 
     newSocket.on('interviewer-joined', () => {
-      console.log('Interviewer joined the session');
       setInterviewerConnected(true);
     });
 
     newSocket.on('interviewer-disconnected', () => {
-      console.log('Interviewer disconnected from the session');
       setInterviewerConnected(false);
     });
 
     newSocket.on('interviewee-joined', (data) => {
-      console.log('Interviewee joined:', data);
       setError('');
+
       setIntervieweeConnected(true);
     });
 
     newSocket.on('interviewee-left', () => {
-      console.log('Interviewee left the session');
       setIntervieweeConnected(false);
       // Also stop monitoring immediately if interviewee leaves
       setIsMonitoring(false);
@@ -440,14 +440,12 @@ const InterviewSession = () => {
 
     // Add handler for explicit monitoring stopped event
     newSocket.on('monitoring-stopped', (data) => {
-      console.log('Monitoring stopped:', data.message);
       setIsMonitoring(false);
       // Clear system metrics display
       setSystemMetrics({ message: data.message || 'Monitoring stopped' });
     });
 
     newSocket.on('code-update', (data) => {
-      console.log('Received code update:', data);
       const newCode = typeof data === 'string' ? data : data.code;
       if (newCode) {
         setCode(newCode);
@@ -481,7 +479,6 @@ const InterviewSession = () => {
     });
 
     newSocket.on('room-ended', ({ reason }) => {
-      console.log('Room ended:', reason);
       setError('The interview session has ended.');
       // Clear localStorage
       localStorage.removeItem(`code-${roomIdParam}`);
@@ -492,7 +489,6 @@ const InterviewSession = () => {
     });
 
     newSocket.on('disconnect', () => {
-      console.log('Disconnected from session');
       setIsConnected(false);
       setError('Disconnected from session. Trying to reconnect...');
     });
@@ -503,12 +499,8 @@ const InterviewSession = () => {
     });
 
     newSocket.on('processUpdate', (data) => {
-      console.log('Received system metrics update:', data);
-      // Extract the actual data structure
       try {
-        // Process metrics for any role, but check data structure
         if (data) {
-          // Check if data is properly structured
           if (!data.data) {
             console.error(
               'Received malformed metrics data - missing data property:',
@@ -517,15 +509,8 @@ const InterviewSession = () => {
             return;
           }
 
-          // Log the full metrics data object for debugging
-          console.log(
-            'Metrics data received:',
-            JSON.stringify(data.data).substring(0, 200) + '...'
-          );
-
           // For interviewee, only show messages
           if (roleParam === 'interviewee' && data.data.message) {
-            console.log('Message for interviewee:', data.data.message);
             setSystemMetrics(data.data);
             return;
           }
@@ -533,36 +518,20 @@ const InterviewSession = () => {
           // Update state with the metrics data for interviewer
           if (roleParam === 'interviewer') {
             setSystemMetrics(data.data);
-            setIsMonitoring(true); // Set monitoring status to true when data is received
+            setIsMonitoring(true);
 
-            // Check if Interview Coder is detected in the processes
-            const found =
-              Array.isArray(data.data) &&
-              data.data.some(
-                (process) =>
-                  process.processName &&
-                  process.processName.includes('Interview Coder')
-              );
-            setFoundInterviewCoder(found);
-
-            // Check if Cluely is detected in the processes
-            const foundCluelyApp =
-              Array.isArray(data.data) &&
-              data.data.some(
-                (process) =>
-                  process.processName && process.processName.includes('Cluely')
-              );
-            setFoundCluely(foundCluelyApp);
-
-            console.log(
-              'Updated systemMetrics state, Interview Coder found:',
-              found,
-              'Cluely found:',
-              foundCluelyApp
+            // Check if specific apps are running
+            const foundInterviewCoder = data.data.some(
+              (app) =>
+                app.processName === 'interview coder' && app.isRunning === true
             );
+            setFoundInterviewCoder(foundInterviewCoder);
+
+            const foundCluelyApp = data.data.some(
+              (app) => app.processName === 'cluely' && app.isRunning === true
+            );
+            setFoundCluely(foundCluelyApp);
           }
-        } else {
-          console.log('Ignoring empty metrics data');
         }
       } catch (err) {
         console.error('Error processing metrics update:', err);
@@ -571,70 +540,40 @@ const InterviewSession = () => {
 
     // Handle interviewer-specific broadcast
     newSocket.on('processUpdate-interviewers', (data) => {
-      console.log('Received interviewer-only metrics broadcast:', data);
-      // Only process if this matches our room AND we're an interviewer
       if (data && data.roomId === roomIdParam && roleParam === 'interviewer') {
-        console.log('Interviewer broadcast matches our room:', roomIdParam);
-        console.log('Setting metrics data:', data.data);
-
         if (!data.data) {
           console.error('Missing data property in metrics update:', data);
           return;
         }
         setSystemMetrics(data.data);
-        setIsMonitoring(true); // Set monitoring status to true when data is received
+        setIsMonitoring(true);
 
-        // Check if Interview Coder is detected in the processes
-        const found =
-          Array.isArray(data.data) &&
-          data.data.some(
-            (process) =>
-              process.processName &&
-              process.processName.includes('Interview Coder')
-          );
-        setFoundInterviewCoder(found);
+        // Check if specific apps are running
+        const foundInterviewCoder = data.data.some(
+          (app) =>
+            app.processName === 'interview coder' && app.isRunning === true
+        );
+        setFoundInterviewCoder(foundInterviewCoder);
 
-        // Check if Cluely is detected in the processes
-        const foundCluelyApp =
-          Array.isArray(data.data) &&
-          data.data.some(
-            (process) =>
-              process.processName && process.processName.includes('Cluely')
-          );
+        const foundCluelyApp = data.data.some(
+          (app) => app.processName === 'cluely' && app.isRunning === true
+        );
         setFoundCluely(foundCluelyApp);
-
-        console.log(
-          'Updated systemMetrics from broadcast, Interview Coder found:',
-          found,
-          'Cluely found:',
-          foundCluelyApp
-        );
-      } else {
-        console.log(
-          `Ignoring metrics: roomId match=${
-            data?.roomId === roomIdParam
-          }, role=${roleParam}`
-        );
       }
     });
 
     // We no longer need the universal broadcast since it's only for interviewers now
     newSocket.on('processUpdate-all', () => {
-      console.log('Received universal metrics broadcast - DEPRECATED');
       // No action, we're using more targeted channels now
     });
 
     // Add reconnect event handling to maintain state during reconnections
     newSocket.on('reconnect', () => {
-      console.log('Reconnected to server');
       setIsConnected(true);
       setError('');
 
       // Re-join the session with current state
       if (roomId && role) {
-        console.log(
-          `Rejoining session after reconnect: roomId=${roomId}, role=${role}`
-        );
         newSocket.emit('join-session', { roomId, role });
       }
     });
@@ -663,7 +602,6 @@ const InterviewSession = () => {
     });
 
     newSocket.on('active-editor-update', (data) => {
-      console.log('Active editor update received:', data);
       if (data && data.activeEditor) {
         setActiveEditor(data.activeEditor);
       }
@@ -674,14 +612,10 @@ const InterviewSession = () => {
     // Add periodic metrics refresh for interviewer only
     let metricsRefreshInterval = null;
     if (roleParam === 'interviewer') {
-      console.log('Setting up automatic metrics refresh for interviewer');
       metricsRefreshInterval = setInterval(() => {
         if (newSocket && newSocket.connected) {
           // Get the most current roomId from state, not closure variable
           const currentRoomId = roomIdParam;
-          console.log(
-            `Auto-refreshing metrics for interviewer in room: ${currentRoomId}`
-          );
 
           // Only request if we have a valid room ID
           if (currentRoomId && currentRoomId.trim() !== '') {
@@ -698,12 +632,10 @@ const InterviewSession = () => {
 
     return () => {
       if (newSocket) {
-        console.log('Cleaning up socket connection');
         newSocket.disconnect();
       }
 
       if (metricsRefreshInterval) {
-        console.log('Clearing metrics refresh interval');
         clearInterval(metricsRefreshInterval);
       }
     };
@@ -713,7 +645,6 @@ const InterviewSession = () => {
   useEffect(() => {
     // Only for interviewer role and when socket is already connected
     if (role === 'interviewer' && socket && socket.connected) {
-      console.log('Initial metrics refresh for interviewer...');
       handleRefreshMetrics();
     }
   }, [role, socket]);
@@ -760,7 +691,7 @@ const InterviewSession = () => {
     if (isMonitoring) {
       const timer = setTimeout(() => {
         setIsMonitoring(false);
-      }, 20000); // Reset monitoring status after 20 seconds of no data
+      }, 5000); // Reset monitoring status after 5 seconds of no data
 
       return () => clearTimeout(timer);
     }
@@ -772,11 +703,6 @@ const InterviewSession = () => {
 
     // Allow both roles to update code in the room
     if (socket && socket.connected) {
-      console.log('Sending code update:', {
-        roomId,
-        code: newCode,
-        activeEditor: role,
-      });
       socket.emit('code-update', { roomId, code: newCode, activeEditor: role });
       // Also emit a separate event to notify about active editor
       socket.emit('active-editor-update', { roomId, activeEditor: role });
@@ -799,8 +725,28 @@ const InterviewSession = () => {
 
   const handleDownloadInstructions = async () => {
     try {
+      // Choose the appropriate file based on the interviewee's OS or current user's OS
+      const scriptInfo =
+        role === 'interviewee'
+          ? getOsSpecificScriptPath(
+              (() => {
+                const userAgent = window.navigator.userAgent.toLowerCase();
+                if (userAgent.indexOf('win') !== -1) return 'win32';
+                if (userAgent.indexOf('mac') !== -1) return 'darwin';
+                if (userAgent.indexOf('linux') !== -1) return 'linux';
+                return 'unknown';
+              })()
+            )
+          : intervieweeOs
+          ? getOsSpecificScriptPath(intervieweeOs)
+          : INSTRUCTIONS_PATH;
+
       // Download the file without any replacements
-      const success = await downloadFile(INSTRUCTIONS_PATH, 'main.py');
+      const success = await downloadFile(
+        scriptInfo.path,
+        scriptInfo.filename,
+        scriptInfo.isBinary || false
+      );
 
       if (!success) {
         setError('Failed to download instructions. Please try again.');

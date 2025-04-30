@@ -37,7 +37,6 @@ const InterviewerRoom = () => {
       });
 
       newSocket.on('connect', () => {
-        console.log('Connected to server');
         setIsConnected(true);
         setError('');
         // Create a new room when connected
@@ -53,7 +52,6 @@ const InterviewerRoom = () => {
       });
 
       newSocket.on('room-created', (data) => {
-        console.log('Room created:', data);
         setRoomId(data.roomId);
         setLoading(false);
       });
@@ -65,7 +63,6 @@ const InterviewerRoom = () => {
       });
 
       newSocket.on('disconnect', () => {
-        console.log('Disconnected from server');
         setIsConnected(false);
         setError('Disconnected from server. Attempting to reconnect...');
       });

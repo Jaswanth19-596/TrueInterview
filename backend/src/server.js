@@ -70,9 +70,7 @@ const activeRooms = new Map();
 const pendingDeletions = new Map();
 
 // Utility functions
-function logWithPrefix(prefix, message, data = '') {
-  console.log(`[${prefix}] ${message}`, data);
-}
+function logWithPrefix(prefix, message, data = '') {}
 
 function debugRoom(roomId) {
   if (activeRooms.has(roomId)) {
@@ -258,48 +256,21 @@ function formatMetricsData(metricsData) {
   let formattedMetrics = [];
 
   try {
-    if (Array.isArray(metricsData) && metricsData.length > 0) {
-      // Format process data from array
-      formattedMetrics = metricsData.map((process) => ({
-        processName: process.processName || 'Unknown Process',
-        cpu:
-          typeof process.cpu === 'number' ? Number(process.cpu.toFixed(1)) : 0,
-        memory: typeof process.memory === 'number' ? process.memory : 0,
-        memoryMB:
-          typeof process.memory === 'number'
-            ? Number((process.memory / (1024 * 1024)).toFixed(1))
-            : 0,
-      }));
-    } else if (typeof metricsData === 'object' && metricsData !== null) {
-      // Try to extract process information from object
-      const processes = metricsData.processes || [];
-      formattedMetrics = Array.isArray(processes)
-        ? processes.map((p) => ({
-            processName: p.name || p.processName || 'Unknown',
-            cpu: typeof p.cpu === 'number' ? Number(p.cpu.toFixed(1)) : 0,
-            memory: typeof p.memory === 'number' ? p.memory : 0,
-            memoryMB:
-              typeof p.memory === 'number'
-                ? Number((p.memory / (1024 * 1024)).toFixed(1))
-                : 0,
-          }))
-        : [];
+    if (typeof metricsData === 'object' && metricsData !== null) {
+      // Handle the new app status dictionary format
+      formattedMetrics = Object.entries(metricsData).map(
+        ([appName, isRunning]) => ({
+          processName: appName,
+          isRunning: isRunning,
+        })
+      );
     }
 
-    // Filter out entries without a process name
-    formattedMetrics = formattedMetrics.filter((p) => p.processName);
-
-    // Sort by CPU usage (highest first)
-    // formattedMetrics.sort((a, b) => b.cpu - a.cpu);
-
-    // Limit to 15 processes to avoid overwhelming the UI
-    formattedMetrics = formattedMetrics.slice(0, 15);
+    return formattedMetrics;
   } catch (err) {
     console.error('Error formatting metrics:', err);
-    formattedMetrics = [];
+    return [];
   }
-
-  return formattedMetrics;
 }
 
 io.on('connection', (socket) => {
@@ -353,18 +324,12 @@ io.on('connection', (socket) => {
   });
 
   socket.on('join-room', (roomId) => {
-    console.log('Attempting to join room:', roomId, 'by socket:', socket.id);
-
     // Store roomId on socket object
     socket.roomId = roomId;
-    console.log(`[STORE] Added roomId ${roomId} to socket ${socket.id}`);
 
     // Check if room exists
     let room = activeRooms.get(roomId);
     if (!room) {
-      console.log(
-        `[ERROR] Room ${roomId} not found for interviewee join request`
-      );
       socket.emit('room-not-found');
       return;
     } else if (
@@ -372,15 +337,11 @@ io.on('connection', (socket) => {
       room.interviewee !== socket.id &&
       room.intervieweeConnected
     ) {
-      console.log('Room is full:', roomId);
       socket.emit('room-full');
       return;
     } else {
       // Cancel any pending deletion timer
       if (pendingDeletions.has(roomId)) {
-        console.log(
-          `[RECONNECT] Cancelling pending deletion for room ${roomId}`
-        );
         clearTimeout(pendingDeletions.get(roomId));
         pendingDeletions.delete(roomId);
       }
@@ -396,15 +357,11 @@ io.on('connection', (socket) => {
     // Force leave any existing rooms to prevent issues
     socket.rooms.forEach((existingRoom) => {
       if (existingRoom !== socket.id) {
-        console.log(
-          `[LEAVE] Forcing interviewee ${socket.id} to leave room ${existingRoom}`
-        );
         socket.leave(existingRoom);
       }
     });
 
     socket.join(roomId);
-    console.log(`[JOIN] Interviewee ${socket.id} joined room ${roomId}`);
 
     // Debug room state
     debugRoom(roomId);
@@ -413,11 +370,13 @@ io.on('connection', (socket) => {
     socket.emit('start-session', { roomId });
   });
 
-  socket.on('join-session', ({ roomId, role }) => {
+  socket.on('join-session', ({ roomId, role, os }) => {
     try {
       logWithPrefix(
         'SESSION',
-        `Joining session: roomId=${roomId}, role=${role}, socketId=${socket.id}`
+        `Joining session: roomId=${roomId}, role=${role}, socketId=${
+          socket.id
+        }, os=${os || 'unknown'}`
       );
 
       // Validate required parameters
@@ -483,10 +442,20 @@ io.on('connection', (socket) => {
           );
         }
 
-        // Update interviewee socket ID
+        // Update interviewee socket ID and store OS information
         room.interviewee = socket.id;
         room.intervieweeConnected = true;
         room.status = 'active';
+
+        // Store OS information if provided
+        if (os) {
+          room.intervieweeOs = os;
+          logWithPrefix(
+            'OS',
+            `Stored interviewee OS: ${os} for room ${roomId}`
+          );
+        }
+
         activeRooms.set(roomId, room);
         logWithPrefix(
           'UPDATE',
@@ -498,6 +467,7 @@ io.on('connection', (socket) => {
           io.to(room.interviewer).emit('interviewee-joined', {
             roomId,
             intervieweeConnected: true,
+            intervieweeOs: room.intervieweeOs || 'unknown',
           });
         }
       }
@@ -533,6 +503,7 @@ io.on('connection', (socket) => {
         hasInterviewee: !!room.interviewee,
         interviewerConnected: room.interviewerConnected,
         intervieweeConnected: room.intervieweeConnected,
+        intervieweeOs: room.intervieweeOs || '',
         ...(socket.id === room.interviewer && { sessionKey: room.sessionKey }),
         messages: room.messages || [], // Include message history
       });
@@ -545,7 +516,6 @@ io.on('connection', (socket) => {
   });
 
   socket.on('code-update', ({ roomId, code, activeEditor }) => {
-    console.log('Code update received:', { roomId, activeEditor });
     const room = activeRooms.get(roomId);
 
     if (room) {
@@ -558,7 +528,6 @@ io.on('connection', (socket) => {
 
   // Handle active editor updates
   socket.on('active-editor-update', ({ roomId, activeEditor }) => {
-    console.log('Active editor update received:', { roomId, activeEditor });
     if (roomId) {
       // Broadcast to everyone in the room except the sender
       socket.to(roomId).emit('active-editor-update', { activeEditor });
@@ -566,7 +535,6 @@ io.on('connection', (socket) => {
   });
 
   socket.on('end-session', ({ roomId }) => {
-    console.log('Ending session:', roomId);
     const room = activeRooms.get(roomId);
 
     if (room && room.interviewer === socket.id) {
@@ -583,9 +551,6 @@ io.on('connection', (socket) => {
 
       // Delete the room immediately - this is intentional termination
       activeRooms.delete(roomId);
-      console.log(
-        `[END] Room ${roomId} has been ended by interviewer ${socket.id}`
-      );
     }
   });
 
@@ -659,7 +624,6 @@ io.on('connection', (socket) => {
   socket.on('chat-message', (data) => {
     const { roomId, message, sender, timestamp } = data;
     if (!activeRooms.has(roomId)) {
-      console.log(`[CHAT] Room ${roomId} not found for chat message`);
       return;
     }
 
@@ -687,9 +651,6 @@ io.on('connection', (socket) => {
 
     // Broadcast the message to all users in the room
     io.to(roomId).emit('chat-message', messageData);
-    console.log(
-      `[CHAT] Message sent to room ${roomId} from ${messageData.sender}`
-    );
   });
 
   // Handle metrics request
@@ -909,7 +870,6 @@ app.get('/room-status/:roomId', (req, res) => {
 
   // If session key is provided, validate it (but don't require it for basic status check)
   if (sessionKey && room.sessionKey && sessionKey !== room.sessionKey) {
-    console.log(`[SECURITY] Invalid session key for room ${roomId}`);
     return res.status(403).json({
       status: 'error',
       message: 'Invalid session key',
@@ -998,9 +958,7 @@ app.post('/send_processes/:roomId', (req, res) => {
     logWithPrefix('DATA SAMPLE', `Received ${data.length} processes:`);
     // Show first 3 processes or all if less than 3
     const sample = data.slice(0, 3);
-    console.log(JSON.stringify(sample, null, 2));
     if (data.length > 3) {
-      console.log(`... and ${data.length - 3} more processes`);
     }
   } else if (data && typeof data === 'object') {
     logWithPrefix(
@@ -1023,6 +981,7 @@ app.post('/send_processes/:roomId', (req, res) => {
 
   // Send metrics to the interviewer only
   if (room.interviewer) {
+    console.log(formattedMetrics);
     sendMetricsToInterviewer(roomId, formattedMetrics);
     logWithPrefix('METRICS', `Sent to interviewer ${room.interviewer}`);
   } else {
