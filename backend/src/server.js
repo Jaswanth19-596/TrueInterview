@@ -13,9 +13,11 @@ dotenv.config();
 const app = express();
 const server = http.createServer(app);
 
+const allowedOrigin = process.env.FRONTEND_URL || '*';
+
 // CORS configuration
 const corsOptions = {
-  origin: process.env.FRONTEND_URL,
+  origin: allowedOrigin,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true,
@@ -26,7 +28,7 @@ app.use(cors(corsOptions));
 // Socket.io configuration
 const io = new Server(server, {
   cors: {
-    origin: 'process.env.FRONTEND_URL',
+    origin: allowedOrigin,
     methods: ['GET', 'POST'],
     credentials: true,
   },
