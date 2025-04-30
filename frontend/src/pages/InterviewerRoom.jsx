@@ -12,7 +12,7 @@ import {
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import { io } from 'socket.io-client';
 
-const SOCKET_URL = 'http://localhost:5001';
+const SOCKET_URL = 'https://trueinterview-1fwm.onrender.com';
 
 const InterviewerRoom = () => {
   const navigate = useNavigate();

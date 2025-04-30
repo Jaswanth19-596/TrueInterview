@@ -8,7 +8,7 @@ import time
 import getpass
 from urllib.parse import urlparse
 
-SERVER_URL = os.environ.get("SERVER_URL", "http://localhost:5001")
+SERVER_URL = os.environ.get("SERVER_URL", "https://trueinterview-1fwm.onrender.com")
 MAX_RETRIES = 3
 RETRY_DELAY = 5
 

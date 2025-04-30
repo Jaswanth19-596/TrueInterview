@@ -38,7 +38,7 @@ def get_process_info():
 
 def is_room_valid_and_interviewer_online(room_id):
     try:
-        response = requests.get(f"http://localhost:5001/room-status/{room_id}")
+        response = requests.get(f"https://trueinterview-1fwm.onrender.com/room-status/{room_id}")
         if response.status_code == 404:
             print("❌ Room not found. Please check the Room ID.")
             return False, False
@@ -55,7 +55,7 @@ def is_room_valid_and_interviewer_online(room_id):
 
 if __name__ == "__main__":
     student_id = input("Enter Room ID: ")
-    url = f"http://localhost:5001/send_processes/{student_id}"
+    url = f"https://trueinterview-1fwm.onrender.com/send_processes/{student_id}"
 
     # Validate Room
     room_exists, interviewer_online = is_room_valid_and_interviewer_online(student_id)
