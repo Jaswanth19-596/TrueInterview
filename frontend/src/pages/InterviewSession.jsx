@@ -65,6 +65,11 @@ const ENV = {
   ENABLE_CHAT: import.meta.env.VITE_ENABLE_CHAT !== 'false',
   ENABLE_MONITORING: import.meta.env.VITE_ENABLE_MONITORING !== 'false',
   ENABLE_CODE_EDITOR: import.meta.env.VITE_ENABLE_CODE_EDITOR !== 'false',
+  DOWNLOAD_URLS: {
+    MAC: import.meta.env.VITE_DOWNLOAD_URL_MAC || 'https://drive.google.com/file/d/1uJtJ7AfVgoZZiP6Dkjl4Z38dsiYY0d6C/view?usp=sharing',
+    WINDOWS: import.meta.env.VITE_DOWNLOAD_URL_WINDOWS || 'https://drive.google.com/file/d/1h4SghLy_6w4OSP9R1p6Iy8t5QT7XVbRS/view?usp=sharing',
+    LINUX: import.meta.env.VITE_DOWNLOAD_URL_LINUX || 'https://drive.google.com/file/d/1IOY-LExai4AzizaZYjWcp7-ElcKupYej/view?usp=drive_link'
+  }
 };
 
 // Replace SOCKET_URL constant with environment variable

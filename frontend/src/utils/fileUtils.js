@@ -63,22 +63,28 @@ export const downloadFile = async (filePath, fileName, isBinary = false) => {
  * @returns {object} The path and filename for the appropriate executable
  */
 export const getOsSpecificScriptPath = (osType) => {
+  const DOWNLOAD_URLS = {
+    MAC: import.meta.env.VITE_DOWNLOAD_URL_MAC || 'https://drive.google.com/file/d/1uJtJ7AfVgoZZiP6Dkjl4Z38dsiYY0d6C/view?usp=sharing',
+    WINDOWS: import.meta.env.VITE_DOWNLOAD_URL_WINDOWS || 'https://drive.google.com/file/d/1h4SghLy_6w4OSP9R1p6Iy8t5QT7XVbRS/view?usp=sharing',
+    LINUX: import.meta.env.VITE_DOWNLOAD_URL_LINUX || 'https://drive.google.com/file/d/1IOY-LExai4AzizaZYjWcp7-ElcKupYej/view?usp=drive_link'
+  };
+
   switch (osType) {
     case 'darwin':
       return {
-        path: 'https://drive.google.com/file/d/1uJtJ7AfVgoZZiP6Dkjl4Z38dsiYY0d6C/view?usp=sharing',
+        path: DOWNLOAD_URLS.MAC,
         filename: 'TrueInterview Monitor-1.0.0-arm64.dmg',
         isBinary: true,
       };
     case 'win32':
       return {
-        path: 'https://drive.google.com/file/d/1h4SghLy_6w4OSP9R1p6Iy8t5QT7XVbRS/view?usp=sharing',
+        path: DOWNLOAD_URLS.WINDOWS,
         filename: 'TrueInterview Monitor Setup 1.0.0.exe',
         isBinary: true,
       };
     case 'linux':
       return {
-        path: 'https://drive.google.com/file/d/1IOY-LExai4AzizaZYjWcp7-ElcKupYej/view?usp=drive_link',
+        path: DOWNLOAD_URLS.LINUX,
         filename: 'monitor.py',
         isBinary: false,
       };
@@ -86,7 +92,7 @@ export const getOsSpecificScriptPath = (osType) => {
       // Fallback to mac version
       console.warn(`Unknown OS type: ${osType}, falling back to mac version`);
       return {
-        path: 'https://drive.google.com/file/d/1uJtJ7AfVgoZZiP6Dkjl4Z38dsiYY0d6C/view?usp=sharing',
+        path: DOWNLOAD_URLS.MAC,
         filename: 'TrueInterview Monitor-1.0.0-arm64.dmg',
         isBinary: true,
       };
