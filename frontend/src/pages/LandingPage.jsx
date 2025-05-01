@@ -12,7 +12,7 @@ const LandingPage = () => {
             <img src={shieldLogo} alt="TrueInterview Logo" className="logo" />
             <div className="title-container">
               <h1>TrueInterview</h1>
-              <p className="tagline">AI-Powered Coding Interview Proctor</p>
+              <p className="tagline">Smart Coding Interview Proctor</p>
             </div>
           </div>
         </div>
@@ -22,7 +22,7 @@ const LandingPage = () => {
         <section className="hero">
           <div className="container">
             <h2>Secure and Fair Coding Interviews</h2>
-            <p>Ensure the integrity of your technical interviews with our AI-powered proctoring system</p>
+            <p>Maintain the integrity of your technical interviews by relying on human expertise rather than AI assistance.</p>
             <div className="cta-buttons">
               <Link to="/interviewer" className="btn btn-primary">Start as Interviewer</Link>
               <Link to="/interviewee" className="btn btn-secondary">Join as Interviewee</Link>

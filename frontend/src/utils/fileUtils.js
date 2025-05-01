@@ -66,28 +66,28 @@ export const getOsSpecificScriptPath = (osType) => {
   switch (osType) {
     case 'darwin':
       return {
-        path: '/assets/dist/main_mac',
-        filename: 'main_mac', // No extension needed for macOS executables
+        path: 'https://drive.google.com/file/d/1uJtJ7AfVgoZZiP6Dkjl4Z38dsiYY0d6C/view?usp=sharing',
+        filename: 'TrueInterview Monitor-1.0.0-arm64.dmg',
         isBinary: true,
       };
     case 'win32':
       return {
-        path: '/assets/dist/monitor.exe',
-        filename: 'monitor.exe',
+        path: 'https://drive.google.com/file/d/1h4SghLy_6w4OSP9R1p6Iy8t5QT7XVbRS/view?usp=sharing',
+        filename: 'TrueInterview Monitor Setup 1.0.0.exe',
         isBinary: true,
       };
     case 'linux':
       return {
-        path: '/assets/main_linux.py',
-        filename: 'main_linux.py',
+        path: 'https://drive.google.com/file/d/1IOY-LExai4AzizaZYjWcp7-ElcKupYej/view?usp=drive_link',
+        filename: 'monitor.py',
         isBinary: false,
       };
     default:
       // Fallback to mac version
       console.warn(`Unknown OS type: ${osType}, falling back to mac version`);
       return {
-        path: '/assets/dist/main_mac',
-        filename: 'main_mac',
+        path: 'https://drive.google.com/file/d/1uJtJ7AfVgoZZiP6Dkjl4Z38dsiYY0d6C/view?usp=sharing',
+        filename: 'TrueInterview Monitor-1.0.0-arm64.dmg',
         isBinary: true,
       };
   }
